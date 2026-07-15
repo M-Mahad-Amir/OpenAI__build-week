@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d3b35" />
+    <title>NoorPath | Quran learning</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Amiri+Quran&family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#reading" aria-label="NoorPath home"><span class="brand-mark">ن</span><span>Noor<span>Path</span></span></a>
+        <nav aria-label="Main navigation">
+          <button class="nav-link active" data-view="reading"><span>◫</span> Read Quran</button>
+          <button class="nav-link" data-view="hifz"><span>◇</span> Hifz practice</button>
+          <button class="nav-link" data-view="lesson"><span>✦</span> Ruku lesson</button>
+          <button class="nav-link" data-view="vocabulary"><span>ع</span> Arabic words</button>
+          <button class="nav-link" data-view="progress"><span>◌</span> Your journey</button>
+        </nav>
+        <div class="sidebar-note"><span>☾</span><p>Learn slowly.<br />Return daily.</p></div>
+      </aside>
+      <main>
+        <header class="topbar"><div><p class="eyebrow" id="crumb">QURAN · SAMPLE LIBRARY</p><h1 id="view-title">Read with presence</h1></div><div class="top-score"><span>✦</span><strong id="points-total">0</strong><small>points</small></div></header>
+        <div id="app" aria-live="polite"></div>
+      </main>
+    </div>
+    <template id="toast-template"><div class="toast" role="status"></div></template>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

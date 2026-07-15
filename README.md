@@ -1,0 +1,38 @@
+# NoorPath — sample Quran learning app
+
+A dependency-free, browser-based prototype for the requested Quran learning experience. It uses a deliberately small **demo corpus** for Al-Fatihah and stores learner progress only in the browser (`localStorage`). Sample tafsir and lesson text must not be presented as a replacement for a verified scholarly source.
+
+## Run it
+
+Open `index.html` in a modern browser, or serve the folder with any static-file server. No API key is needed for this sample: the lesson quiz and Ask AI use an on-device retrieval-style matcher against the local demo corpus, so their answers are constrained to displayed material.
+
+## Included now
+
+- Reading mode: Arabic, English/Urdu translation switch, per-ayah word glosses, tafsir drawer, and jump to Hifz.
+- Hifz: choose the next continuation from four shuffled Arabic phrase choices.
+- Ruku lesson: background, summary, a randomized 5-question MCQ set, source display, and a corpus-bound Ask AI panel.
+- Vocabulary: common-word cards and a randomized Arabic vocabulary MCQ.
+- Journey: daily salah/anger/ayah/Hifz check-in, scaled score, local calendar, streak, and a best-effort 11pm browser notification while the app is open.
+- Error boundary, guarded local storage, and safe fallbacks for unsupported notifications.
+
+## Required before a production launch
+
+1. **Verified Quran text**: a licensed/approved Uthmani Arabic text, stable ayah IDs, surah/ruku/juz metadata, sajdah markers, and a documented revision source.
+2. **Translations and word-by-word data**: separately licensed English and Urdu translations plus morphology/gloss data, with translator/source attribution and display permissions.
+3. **Tafsir corpus**: a licensed, scholar-approved English tafsir at ayah granularity. Keep source, edition, page/volume where applicable, and an explicit review policy.
+4. **RAG pipeline**: chunk tafsir by ruku/ayah, attach `surah`, `ayahStart`, `ayahEnd`, `ruku`, translator/tafsir edition, and citations. At query time fetch the selected ruku plus exactly three ayahs of contextual overlap on each side (where available); reject answers without a cited supporting chunk.
+5. **AI provider/API**: an LLM API key is needed only for genuinely generated lesson explanations and Ask AI. Use a paid or trial provider with an embeddings model plus a small answer model; “free tiers” and credits change frequently, so choose based on the provider’s current terms and never expose a key in the browser. Put calls behind a server endpoint, rate-limit it, log citations (not private chat contents), and add a moderation/refusal policy.
+6. **Database and auth**: authenticated backend plus encrypted per-user records for progress/check-ins. Browser storage is only a prototype.
+7. **Notifications**: a PWA/service worker and web-push backend (or native mobile notifications). A browser page alone cannot reliably send a notification when it is closed.
+8. **Scholarly review and safety**: review all generated lesson/quiz prompts, forbid uncited doctrinal answers, show citations, and offer “I do not have enough verified material” as a valid response.
+9. **Privacy and product requirements**: consent, export/delete controls, age policy, data-retention policy, accessibility, offline handling, analytics opt-in, and a clear note that salah/anger logs are private wellbeing data.
+
+## Safe RAG answer contract
+
+The production answer endpoint should return `{ answer, citations, grounded: true }` only when every claim is supported by retrieved chunks. Otherwise it should return `{ answer: "I don’t have enough verified material in this selected ruku to answer that precisely.", citations: [], grounded: false }`. Generate five quiz questions from the same retrieved chunks and validate every correct answer and distractor against citations before returning it.
+
+## Score used in the prototype
+
+`(salah points / 15 × 55) + (anger rating / 5 × 20) + (min(ayahs,25) / 25 × 15) + (min(hifz,10) / 10 × 10)`
+
+Salah points per prayer are mosque 3, home 2, qaza 1, and missed 0. The implementation rounds this 100-point total and adds it once per daily check-in.
