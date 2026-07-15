@@ -1,5 +1,5 @@
 // Demo-only corpus. Replace this file with a verified Quran + licensed tafsir dataset.
-const SURAH_SAMPLE = {
+export const SURAH_SAMPLE = {
   id: 1, name: "Al-Fatihah", arabicName: "ٱلْفَاتِحَة", meaning: "The Opening", ruku: 1,
   verses: [
     { n: 1, ar: "بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ", en: "In the name of Allah, the Most Compassionate, Most Merciful.", ur: "اللہ کے نام سے جو بہت مہربان، نہایت رحم والا ہے۔", words: [["بِسْمِ","In the name"],["ٱللَّهِ","of Allah"],["ٱلرَّحْمَـٰنِ","the Most Compassionate"],["ٱلرَّحِيمِ","the Most Merciful"]] },
@@ -28,7 +28,7 @@ const SURAH_SAMPLE = {
   }
 };
 
-const QUIZ_BANK = [
+export const QUIZ_BANK = [
   { q: "Which sequence best reflects the movement of Al-Fatihah?", a: "Praise → accountability → worship and a request for guidance", choices: ["Praise → accountability → worship and a request for guidance","Law → history → pilgrimage","Creation → trade → inheritance","War → treaty → migration"] },
   { q: "Complete the idea in verse 5: “You alone we worship and You alone …”", a: "we ask for help", choices: ["we ask for help","we fear as rulers","we call by lineage","we praise in public"] },
   { q: "What does the title in verse 4 add to the surah’s message?", a: "A reminder that final judgment belongs to Allah", choices: ["A reminder that final judgment belongs to Allah","A description of seasonal time","A command to count days","A promise of worldly status"] },
@@ -38,7 +38,7 @@ const QUIZ_BANK = [
   { q: "Which response is requested after the declaration of worship?", a: "Guidance to the straight path", choices: ["Guidance to the straight path","Permission to judge others","A list of worldly rewards","Freedom from accountability"] }
 ];
 
-const CORE_VOCABULARY = [
+export const CORE_VOCABULARY = [
   { ar: "اللَّه", translit: "Allah", meaning: "God", frequency: "Core Quran word" },
   { ar: "رَبّ", translit: "Rabb", meaning: "Lord / Sustainer", frequency: "Core Quran word" },
   { ar: "رَحْمَة", translit: "Rahmah", meaning: "Mercy", frequency: "Core Quran word" },
@@ -48,7 +48,3 @@ const CORE_VOCABULARY = [
   { ar: "صِرَاط", translit: "Sirāt", meaning: "path", frequency: "Core Quran word" },
   { ar: "دِين", translit: "Dīn", meaning: "judgment / way of life", frequency: "Core Quran word" }
 ];
-
-// This is intentionally a browser global rather than an ES module so index.html
-// can be opened directly from a shared folder as well as served over localhost.
-window.QuranSampleData = { SURAH_SAMPLE, QUIZ_BANK, CORE_VOCABULARY };
