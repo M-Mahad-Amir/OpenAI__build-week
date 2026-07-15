@@ -1,0 +1,61 @@
+Features
+1. Summary, background, explanation of a verse or set of verses
+2. A small quiz at end of each set to evaluate learning
+3. Arabic vocabulary quiz from each set
+3. Streak, bonus, points system
+4. Daily self reflection of ones daily habits (tentative)
+5. Chatbot to understand something in topic (tentative)
+
+___________________________________________________________________________________________________________________
+
+
+The file contains a coherent vision for your project, not just a list of features. Here's the understanding I currently have from it:
+
+## Current Project Vision
+
+An AI-powered Quran learning and study companion focused on helping users understand, retain, and build consistent study habits, rather than simply reading the Quran or chatting with an AI.
+
+## Core Problem:
+The project addresses the fact that many people can read the Quran but struggle with:
+
+Understanding verses
+Learning Quranic Arabic vocabulary
+Connecting themes and related verses
+Retaining what they've learned
+Staying consistent in their study routine
+
+## Main Features:
+From the document, the planned features include:
+
+Interactive verse-by-verse explanations and background
+AI assistant using RAG with trusted sources
+Arabic vocabulary learning (meaning, root word, occurrences)
+AI-generated summaries
+Quizzes after study sessions
+Vocabulary quizzes
+Daily streaks, points, and gamification
+Progress tracking
+Reflection/journaling (tentative)
+Chatbot for topic-specific questions (tentative)
+
+## User Flow:
+The intended experience is:
+
+Select a Surah
+Read an Ayah
+Tap a verse or word for contextual information
+Ask AI questions grounded in authenticated sources
+Receive summaries, quizzes, and vocabulary practice
+Track learning progress through streaks and performance
+
+## Technical Direction
+The AI stack currently envisioned includes:
+
+Retrieval-Augmented Generation (RAG)
+LLM-powered explanations and quizzes
+Semantic search
+Vector database
+Natural language Q&A grounded in trusted references
+Elevator Pitch
+
+The project is positioned as an AI-powered Quran learning companion that complements traditional learning through authenticated sources, personalized learning, and habit-building—not as a replacement for scholars or traditional study.
