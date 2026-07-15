@@ -29,16 +29,8 @@
       </main>
     </div>
     <template id="toast-template"><div class="toast" role="status"></div></template>
-    <!-- Plain, ordered scripts keep direct file:// opening compatible across previews and browsers. -->
-    <script>
-      window.addEventListener("error", function (event) {
-        var target = document.getElementById("app");
-        if (target && !target.children.length) {
-          target.innerHTML = '<div class="card empty"><h2>App startup issue</h2><p>Open this project folder intact and refresh. Details: ' + String(event.message || "unknown error").replace(/[<>&]/g, "") + '</p></div>';
-        }
-      });
-    </script>
-    <script src="./src/data.js"></script>
-    <script src="./src/app.js"></script>
+    <!-- Plain scripts deliberately support opening this prototype with file:// as well. -->
+    <script defer src="./src/data.js"></script>
+    <script defer src="./src/app.js"></script>
   </body>
 </html>
