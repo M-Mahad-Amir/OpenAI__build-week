@@ -4,7 +4,7 @@ A dependency-free, browser-based prototype for the requested Quran learning expe
 
 ## Run it
 
-Open `index.html` in a modern browser, or serve the folder with any static-file server. No API key is needed for this sample: the lesson quiz and Ask AI use an on-device retrieval-style matcher against the local demo corpus, so their answers are constrained to displayed material.
+You can open `index.html` directly in a modern browser; this prototype deliberately uses plain local scripts so that works. For the normal team workflow, install Node.js 18+ once, clone the repository, run `npm start`, and open `http://localhost:4173`. The command staying open is expected: it is the local web server, not a stalled installation. No `npm install` is required because the server has no external dependencies.
 
 ## Included now
 

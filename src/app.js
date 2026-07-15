@@ -1,4 +1,8 @@
-import { SURAH_SAMPLE, QUIZ_BANK, CORE_VOCABULARY } from "./data.js";
+const { SURAH_SAMPLE, QUIZ_BANK, CORE_VOCABULARY } = window.QuranSampleData || {};
+
+if (!SURAH_SAMPLE || !QUIZ_BANK || !CORE_VOCABULARY) {
+  throw new Error("Sample data did not load. Ensure src/data.js is available beside index.html.");
+}
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const app = $("#app");
