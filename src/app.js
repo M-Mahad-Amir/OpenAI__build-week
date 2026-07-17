@@ -1,8 +1,10 @@
-import { 
-  fetchDynamicSurahData, 
-  generateDynamicQuiz, 
-  generateDynamicVocabulary, 
-  askGeminiAboutLesson 
+import { getLocalVocabulary, getRuku, createStudyContext } from "./quranService.js";
+import {
+  askGeminiAboutLesson,
+  generateContextualExplanation,
+  generateDynamicQuiz,
+  generateStudySummary,
+  isGeminiConfigured
 } from "./geminiService.js";
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
@@ -19,7 +21,6 @@ const safeRead = () => {
 
 let progress = safeRead();
 
-// Added activeSurah, quizBank, vocabBank, loading state, and target settings
 let state = { 
   view: "reading", 
   language: "en", 
@@ -32,13 +33,17 @@ let state = {
   quizIndex: 0, 
   quizScore: 0, 
   vocabQuestion: null,
-  // Dynamic settings
+  // Local corpus selection and optional AI UI state
   loading: false,
   targetSurah: "Al-Fatihah",
   targetRuku: 1,
   activeSurah: null,
   quizBank: [],
-  vocabBank: []
+  vocabBank: [],
+  contextualExplanations: {},
+  contextualLoadingAyah: null,
+  summaryLoading: false,
+  quizLoading: false
 };
 
 const escape = (value = "") => String(value).replace(/[&<>'"]/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;" })[char]);
@@ -50,28 +55,23 @@ const points = () => Object.values(progress.daily).reduce((sum, item) => sum + (
 const setHeading = (title, crumb) => { $("#view-title").textContent = title; $("#crumb").textContent = crumb; $("#points-total").textContent = points(); };
 const ayahSegments = () => state.activeSurah ? state.activeSurah.verses.map(v => v.ar.split(" ").slice(0, 4).join(" ")) : [];
 
-// Core method to load everything from the Gemini API dynamically
-async function loadDynamicStudyData() {
+// Quran text, translations, verse metadata, and ruku selection are always local.
+async function loadLocalStudyData() {
   state.loading = true;
   render();
   try {
-    // 1. Fetch Surah structure, translations, tafsir, and lesson content
-    state.activeSurah = await fetchDynamicSurahData(state.targetSurah, state.targetRuku);
-    
-    // 2. Fetch vocabulary built dynamically from the current verse list
-    state.vocabBank = await generateDynamicVocabulary(state.activeSurah.verses);
-    state.vocabQuestion = null; // reset vocab game
-    
-    // 3. Generate 5 authentic quiz questions for this lesson
-    state.quizBank = await generateDynamicQuiz(state.targetSurah, state.targetRuku, state.activeSurah.lesson.summary);
+    state.activeSurah = await getRuku(state.targetSurah, state.targetRuku);
+    state.vocabBank = getLocalVocabulary(state.activeSurah);
+    state.vocabQuestion = null;
+    state.quizBank = [];
     newLessonQuiz();
-
     state.tafsirAyah = null;
     state.hifzIndex = 0;
     state.hifzChoices = [];
+    state.contextualExplanations = {};
   } catch (error) {
-    console.error("Failed to fetch data from Gemini:", error);
-    toast("Error contacting Gemini API. Please check your API key.");
+    console.error("Failed to load the local Quran corpus:", error);
+    toast(error.message || "Could not load the local Quran corpus.");
   } finally {
     state.loading = false;
     render();
@@ -84,7 +84,7 @@ function readingView() {
   
   app.innerHTML = `
     <section class="hero">
-      <p>RUKU ${state.activeSurah.ruku} · ${state.activeSurah.verses.length} AYAHS · AI GENERATED</p>
+      <p>RUKU ${state.activeSurah.ruku} · ${state.activeSurah.verses.length} AYAHS · LOCAL QURAN CORPUS</p>
       <h2>${state.activeSurah.name} <span style="font-weight:400;font-size:18px">— ${state.activeSurah.meaning}</span></h2>
       <div class="arabic">${state.activeSurah.arabicName}</div>
     </section>
@@ -93,9 +93,9 @@ function readingView() {
     <div class="card" style="margin-bottom: 20px; padding: 15px;">
       <p class="section-label">STUDY ANOTHER PORTION</p>
       <form id="surah-loader-form" style="display: flex; gap: 10px; align-items: center;">
-        <input type="text" id="input-surah" class="field" value="${state.targetSurah}" placeholder="e.g. Al-Baqarah" style="margin:0; flex: 2;" required />
+        <input type="text" id="input-surah" class="field" value="${state.targetSurah}" placeholder="e.g. 'Al-Baqarah' or 'The Cow'" style="margin:0; flex: 2;" required />
         <input type="number" id="input-ruku" class="field" value="${state.targetRuku}" min="1" max="40" style="margin:0; flex: 1;" required />
-        <button type="submit" class="button" style="padding: 10px 15px;">Load with Gemini</button>
+        <button type="submit" class="button" style="padding: 10px 15px;">Load locally</button>
       </form>
     </div>
 
@@ -135,15 +135,15 @@ function readingView() {
 }
 
 function tafsirFor(n) {
-  const entry = state.activeSurah.tafsir.find(t => { 
-    const [start, end = start] = t.ayah.split(/[–-]/).map(Number); 
-    return n >= start && n <= end; 
-  }) || state.activeSurah.tafsir[0];
-  
+  const explanation = state.contextualExplanations[n];
+  const loading = state.contextualLoadingAyah === n;
   return `
     <div class="tafsir">
-      <h4>${entry.title} <span class="pill">Ayah ${entry.ayah}</span></h4>
-      <p>${entry.text}</p>
+      <h4>Contextual explanation <span class="pill">Ayah ${n}</span></h4>
+      ${explanation
+        ? `<p>${escape(explanation)}</p><p class="source">AI-generated from the selected local ayah; not a substitute for verified tafsir.</p>`
+        : `<p>Generate an explanation limited to this locally loaded ayah and its translations.</p>
+           <button class="text-button" data-action="generate-context" data-ayah="${n}" ${loading ? "disabled" : ""}>${loading ? "Generating…" : "Generate contextual explanation"}</button>`}
       <button class="text-button" data-action="to-lesson">Open grounded lesson →</button>
     </div>`;
 }
@@ -203,40 +203,38 @@ function lessonView() {
   
   app.innerHTML = `
     <section class="hero">
-      <p>LESSON MODE · RUKU ${state.activeSurah.ruku}</p>
-      <h2>A dynamic, sourced lesson on ${state.activeSurah.name}</h2>
+      <p>LESSON MODE · RUKU ${state.activeSurah.ruku} · LOCAL SOURCE</p>
+      <h2>A locally grounded lesson on ${state.activeSurah.name}</h2>
     </section>
     <div class="lesson-grid">
       <article class="card">
         <p class="section-label">BACKGROUND</p>
         <h2>${state.activeSurah.name}</h2>
-        <p>${state.activeSurah.lesson.background}</p>
+        <p>${escape(state.activeSurah.lesson.background)}</p>
         <p class="section-label">SHORT SUMMARY</p>
-        <p>${state.activeSurah.lesson.summary}</p>
-        <div class="source-list">
-          <span class="source">Dynamic Gemini Analysis</span>
-          <span class="source">Contextual Quran Study Base</span>
-        </div>
+        <p>${escape(state.activeSurah.lesson.summary)}</p>
+        <div class="source-list">${state.activeSurah.lesson.sources.map(source => `<span class="source">${escape(source)}</span>`).join("")}</div>
+        <button class="text-button" data-action="generate-summary" ${state.summaryLoading ? "disabled" : ""}>${state.summaryLoading ? "Generating summary…" : "Generate AI summary"}</button>
       </article>
       <article class="card">
         <p class="section-label">RUKU QUIZ · AI-GENERATED</p>
         ${current ? `
           <p class="question-progress">Question ${state.quizIndex + 1} of 5 · ${state.quizScore} correct</p>
-          <h3>${current.q}</h3>
+          <h3>${escape(current.q)}</h3>
           <div id="quiz-options">
-            ${current.choices.map(choice => `<button class="quiz-option" data-action="quiz-answer" data-choice="${escape(choice)}">${choice}</button>`).join("")}
+            ${current.choices.map(choice => `<button class="quiz-option" data-action="quiz-answer" data-choice="${escape(choice)}">${escape(choice)}</button>`).join("")}
           </div>
           <div id="quiz-feedback"></div>
         ` : `
-          <p>Quiz generated successfully. Click below to start or try a different set.</p>
+          <p>${isGeminiConfigured() ? "Generate a five-question quiz from this local ruku." : "Add your Gemini API key in src/geminiService.js to generate a quiz from this local ruku."}</p>
         `}
-        <button class="text-button" data-action="refresh-quiz" style="margin-top: 15px;">↻ Re-generate new quiz</button>
+        <button class="text-button" data-action="refresh-quiz" ${state.quizLoading ? "disabled" : ""} style="margin-top: 15px;">${state.quizLoading ? "Generating quiz…" : "↻ Generate AI quiz"}</button>
       </article>
     </div>
     <section class="card" style="margin-top:18px">
       <p class="section-label">ASK AI · CHAT INTERACTIVE</p>
       <h2>Ask about this ruku</h2>
-      <p>The AI understands the verses you are studying. Ask any question to help clarify meanings or context.</p>
+      <p>The AI receives only the locally loaded verses and translations for this ruku. Ask any question to help clarify meanings or context.</p>
       <form class="ask-form" id="ask-form">
         <input id="ask-input" maxlength="200" placeholder="e.g., Explain the core message of this ruku?" required />
         <button class="button">Ask AI</button>
@@ -246,7 +244,12 @@ function lessonView() {
 }
 
 function vocabularyView() {
-  if (!state.activeSurah || !state.vocabBank.length) return;
+  if (!state.activeSurah) return;
+  if (!state.vocabBank.length) {
+    setHeading("Arabic, one word at a time", "VOCABULARY · LOCAL GLOSSARY");
+    app.innerHTML = `<section class="card"><p class="section-label">LOCAL GLOSSARY</p><h2>No matched glossary terms for this ruku yet</h2><p>The imported datasets include Arabic tokens but no licensed word-by-word translations. Add a reviewed glossary or morphology dataset to extend this view.</p></section>`;
+    return;
+  }
   setHeading("Arabic, one word at a time", "VOCABULARY · HIGH-VALUE WORDS");
   
   if (!state.vocabQuestion) { 
@@ -263,7 +266,7 @@ function vocabularyView() {
       <article class="card">
         <p class="section-label">CORE RUKU VOCABULARY</p>
         <h2>Recognize the building blocks</h2>
-        <p>Gemini extracted these high-frequency vocabulary words directly from this lesson's text:</p>
+        <p>These reviewed local glossary terms appear in the selected ruku. The imported datasets do not include a complete word-by-word translation layer.</p>
         <div>
           ${state.vocabBank.map(w => `
             <div class="vocab-card">
@@ -328,8 +331,8 @@ function render() {
       app.innerHTML = `
         <div class="card empty" style="padding: 50px 20px;">
           <div class="brand-mark" style="margin: 0 auto 20px; font-size: 32px; width: 50px; height: 50px;">ن</div>
-          <h2>Consulting Gemini AI...</h2>
-          <p>Structuring clean, authenticated lesson details and quizzes for Surah ${state.targetSurah}. Please wait a moment.</p>
+          <h2>Loading the local Quran corpus…</h2>
+          <p>Retrieving Surah ${state.targetSurah}, ruku ${state.targetRuku}, and its imported translations.</p>
         </div>`;
       return;
     }
@@ -359,16 +362,9 @@ document.addEventListener("click", event => {
     if (action === "restart-hifz") { state.hifzIndex = 0; state.hifzChoices = []; render(); }
     if (action === "hifz-answer") answerHifz(button);
     if (action === "quiz-answer") answerQuiz(button);
-    if (action === "refresh-quiz") { 
-      state.loading = true;
-      render();
-      generateDynamicQuiz(state.activeSurah.name, state.activeSurah.ruku, state.activeSurah.lesson.summary).then(quiz => {
-        state.quizBank = quiz;
-        newLessonQuiz();
-        state.loading = false;
-        render();
-      });
-    }
+    if (action === "refresh-quiz") generateQuiz();
+    if (action === "generate-summary") generateSummary();
+    if (action === "generate-context") generateContext(Number(button.dataset.ayah));
     if (action === "vocab-answer") answerVocab(button);
     if (action === "next-vocab") { state.vocabQuestion = null; render(); }
     if (action === "enable-reminder") enableReminder();
@@ -392,7 +388,7 @@ document.addEventListener("submit", event => {
     if (event.target.id === "surah-loader-form") {
       state.targetSurah = $("#input-surah").value;
       state.targetRuku = Number($("#input-ruku").value);
-      loadDynamicStudyData();
+      loadLocalStudyData();
     }
   } catch (error) { 
     console.error(error); 
@@ -439,16 +435,73 @@ function answerVocab(button) {
   $("#vocab-feedback").innerHTML = `<div class="feedback">${correct ? "Correct—well remembered." : `The answer is: ${state.vocabQuestion.word.meaning}.`}</div>`; 
 }
 
-// Full, unhallucinated dynamic Ask AI Implementation 
+async function generateSummary() {
+  if (!isGeminiConfigured()) return toast("Paste your Gemini API key in src/geminiService.js to use AI summaries.");
+  state.summaryLoading = true;
+  render();
+  try {
+    const summary = await generateStudySummary(createStudyContext(state.activeSurah));
+    state.activeSurah.lesson = {
+      ...state.activeSurah.lesson,
+      background: summary.background,
+      summary: summary.summary,
+      sources: [...state.activeSurah.lesson.sources, "AI summary constrained to the selected local ruku"]
+    };
+  } catch (error) {
+    console.error("Could not generate AI summary:", error);
+    toast("Could not generate an AI summary. Check the key and Gemini settings.");
+  } finally {
+    state.summaryLoading = false;
+    render();
+  }
+}
+
+async function generateQuiz() {
+  if (!isGeminiConfigured()) return toast("Paste your Gemini API key in src/geminiService.js to use AI quizzes.");
+  state.quizLoading = true;
+  render();
+  try {
+    const quiz = await generateDynamicQuiz(createStudyContext(state.activeSurah));
+    if (!Array.isArray(quiz) || quiz.length < 5) throw new Error("Gemini returned an incomplete quiz.");
+    state.quizBank = quiz;
+    newLessonQuiz();
+  } catch (error) {
+    console.error("Could not generate AI quiz:", error);
+    toast("Could not generate an AI quiz. Check the key and Gemini settings.");
+  } finally {
+    state.quizLoading = false;
+    render();
+  }
+}
+
+async function generateContext(ayahNumber) {
+  if (!isGeminiConfigured()) return toast("Paste your Gemini API key in src/geminiService.js to generate contextual explanations.");
+  state.contextualLoadingAyah = ayahNumber;
+  render();
+  try {
+    state.contextualExplanations[ayahNumber] = await generateContextualExplanation(
+      createStudyContext(state.activeSurah, { ayahNumber })
+    );
+  } catch (error) {
+    console.error("Could not generate contextual explanation:", error);
+    toast("Could not generate the contextual explanation. Check the key and Gemini settings.");
+  } finally {
+    state.contextualLoadingAyah = null;
+    render();
+  }
+}
+
+// AI Assistant is constrained to the local ruku currently on screen.
 async function askAI(question) {
+  if (!isGeminiConfigured()) return toast("Paste your Gemini API key in src/geminiService.js to use the AI Assistant.");
   const outputDiv = $("#ask-output");
   outputDiv.innerHTML = `<div class="ask-answer"><strong>Grounded answer</strong><br>Asking AI companion...</div>`;
   try {
-    const response = await askGeminiAboutLesson(question, state.activeSurah.lesson, state.activeSurah.name, state.activeSurah.ruku);
+    const response = await askGeminiAboutLesson(question, createStudyContext(state.activeSurah));
     outputDiv.innerHTML = `
       <div class="ask-answer">
-        <strong>Grounded answer</strong><br>${response}<br>
-        <span class="source">Source: Authentic context extraction of Surah ${state.activeSurah.name}</span>
+        <strong>Grounded answer</strong><br>${escape(response)}<br>
+        <span class="source">Source: locally loaded ${state.activeSurah.name}, ruku ${state.activeSurah.ruku}</span>
       </div>`;
   } catch (error) {
     outputDiv.innerHTML = `<div class="ask-answer"><strong>Grounded answer</strong><br>Error generating answer.</div>`;
@@ -463,5 +516,5 @@ window.addEventListener("error", error => console.error("Unexpected app error", 
 setInterval(reminderTick, 60 * 60 * 1000); 
 reminderTick(); 
 
-// Initial app load using Gemini
-loadDynamicStudyData();
+// Initial app load is independent of Gemini.
+loadLocalStudyData();

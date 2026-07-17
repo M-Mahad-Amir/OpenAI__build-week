@@ -1,19 +1,25 @@
-# NoorPath — sample Quran learning app
+# NoorPath — Quran learning app
 
-A dependency-free, browser-based prototype for the requested Quran learning experience. It uses a deliberately small **demo corpus** for Al-Fatihah and stores learner progress only in the browser (`localStorage`). Sample tafsir and lesson text must not be presented as a replacement for a verified scholarly source.
+A browser-based Quran learning prototype. Quran text, English translation, Urdu translation, verse metadata, and ruku selection are loaded locally from `data/quran.json`; learner progress stays in browser `localStorage`. Gemini is optional and is used only for AI summaries, quizzes, contextual explanations, and the Ask AI panel.
 
 ## Run it
 
-Open `index.html` in a modern browser, or serve the folder with any static-file server. No API key is needed for this sample: the lesson quiz and Ask AI use an on-device retrieval-style matcher against the local demo corpus, so their answers are constrained to displayed material.
+Serve the folder with a static-file server, then open the app in a modern browser. The local corpus is loaded with `fetch`, so opening `index.html` directly from `file://` is not supported. No API key is needed to read Quran content, translations, or use Hifz and progress features. To enable optional AI features, paste a browser-restricted Gemini key into `src/geminiService.js`.
 
 ## Included now
 
-- Reading mode: Arabic, English/Urdu translation switch, per-ayah word glosses, tafsir drawer, and jump to Hifz.
+- Reading mode: Arabic, English/Urdu translation switch, locally tokenized words, on-request contextual explanations, and jump to Hifz.
 - Hifz: choose the next continuation from four shuffled Arabic phrase choices.
-- Ruku lesson: background, summary, a randomized 5-question MCQ set, source display, and a corpus-bound Ask AI panel.
-- Vocabulary: common-word cards and a randomized Arabic vocabulary MCQ.
+- Ruku lesson: local source display plus optional AI summary, randomized AI-generated MCQs, and a corpus-bound Ask AI panel.
+- Vocabulary: a local reviewed glossary; a separate licensed word-by-word dataset is needed for complete coverage.
 - Journey: daily salah/anger/ayah/Hifz check-in, scaled score, local calendar, streak, and a best-effort 11pm browser notification while the app is open.
 - Error boundary, guarded local storage, and safe fallbacks for unsupported notifications.
+
+## Data and AI boundaries
+
+- `src/quranService.js` is the only client-side boundary for Quran text, translations, verse metadata, surahs, and rukus. It currently reads `data/quran.json`; a future Supabase repository can replace that implementation without changing the UI.
+- `createStudyContext()` returns only the selected local ruku (or ayah) for AI calls. It is the seam for a future embeddings/RAG retrieval layer and keeps canonical Quran data separate from generated material.
+- `src/geminiService.js` contains optional AI-only operations. It never loads or generates canonical Quran text, translations, or metadata.
 
 ## Required before a production launch
 

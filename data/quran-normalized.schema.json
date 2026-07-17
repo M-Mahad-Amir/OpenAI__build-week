@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://noorpath.local/schemas/quran-normalized.schema.json",
+  "title": "NoorPath normalized Quran corpus",
+  "description": "Canonical, source-attributed Quran reading corpus. Build the UI's per-ruku view from this document; do not place generated tafsir, lessons, or quizzes in canonical ayah records.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "source", "surahs", "ayahs"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "source": {
+      "$ref": "#/$defs/sourceManifest"
+    },
+    "surahs": {
+      "type": "array",
+      "description": "One record for each of the 114 surahs, ordered by id.",
+      "minItems": 114,
+      "maxItems": 114,
+      "items": {
+        "$ref": "#/$defs/surah"
+      }
+    },
+    "ayahs": {
+      "type": "array",
+      "description": "Flat, ordered ayah records. `id` is the stable join key for study, hifz, tafsir, and progress data.",
+      "minItems": 6236,
+      "maxItems": 6236,
+      "items": {
+        "$ref": "#/$defs/ayah"
+      }
+    }
+  },
+  "$defs": {
+    "sourceManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quranText", "translations"],
+      "properties": {
+        "quranText": {
+          "$ref": "#/$defs/sourceAttribution"
+        },
+        "translations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["en", "ur"],
+          "properties": {
+            "en": { "$ref": "#/$defs/sourceAttribution" },
+            "ur": { "$ref": "#/$defs/sourceAttribution" }
+          }
+        },
+        "importedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "sourceAttribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "license"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "edition": { "type": "string" },
+        "license": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri" },
+        "revision": { "type": "string" }
+      }
+    },
+    "surah": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "names", "revelationType", "ayahCount"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1, "maximum": 114 },
+        "names": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["english", "arabic", "transliteration"],
+          "properties": {
+            "english": { "type": "string", "minLength": 1 },
+            "arabic": { "type": "string", "minLength": 1 },
+            "transliteration": { "type": "string", "minLength": 1 }
+          }
+        },
+        "revelationType": {
+          "enum": ["Meccan", "Medinan"]
+        },
+        "ayahCount": { "type": "integer", "minimum": 1, "maximum": 286 }
+      }
+    },
+    "ayah": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "surahId", "numberInSurah", "numberInQuran", "arabic", "translations", "location", "sajdah", "words"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^(?:[1-9]|[1-9][0-9]|10[0-9]|11[0-4]):[1-9][0-9]{0,2}$",
+          "description": "Composite key: `${surahId}:${numberInSurah}`, e.g. `1:1`."
+        },
+        "surahId": { "type": "integer", "minimum": 1, "maximum": 114 },
+        "numberInSurah": { "type": "integer", "minimum": 1, "maximum": 286 },
+        "numberInQuran": { "type": "integer", "minimum": 1, "maximum": 6236 },
+        "arabic": { "type": "string", "minLength": 1 },
+        "translations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["en", "ur"],
+          "properties": {
+            "en": { "type": "string", "minLength": 1 },
+            "ur": { "type": "string", "minLength": 1 }
+          }
+        },
+        "location": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ruku", "juz", "manzil", "hizbQuarter"],
+          "properties": {
+            "ruku": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["numberInSurah", "numberInQuran"],
+              "properties": {
+                "numberInSurah": { "type": "integer", "minimum": 1 },
+                "numberInQuran": { "type": "integer", "minimum": 1, "maximum": 556 }
+              }
+            },
+            "juz": { "type": "integer", "minimum": 1, "maximum": 30 },
+            "manzil": { "type": "integer", "minimum": 1, "maximum": 7 },
+            "hizbQuarter": { "type": "integer", "minimum": 1, "maximum": 240 }
+          }
+        },
+        "sajdah": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["isMarked"],
+          "properties": {
+            "isMarked": { "type": "boolean" },
+            "number": { "type": "integer", "minimum": 1, "maximum": 15 }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "isMarked": { "const": true } } },
+              "then": { "required": ["number"] }
+            }
+          ]
+        },
+        "words": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Tokenized Arabic words from `list_of_words`. English glosses are optional because neither input CSV supplies them.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["position", "arabic"],
+            "properties": {
+              "position": { "type": "integer", "minimum": 1 },
+              "arabic": { "type": "string", "minLength": 1 },
+              "gloss": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "en": { "type": "string", "minLength": 1 },
+                  "ur": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-normalization": {
+    "joinKey": ["surah_no", "ayah_no_surah"],
+    "quranCsv": {
+      "surah_no": "surahId",
+      "surah_name_en": "surahs[].names.english",
+      "surah_name_ar": "surahs[].names.arabic",
+      "surah_name_roman": "surahs[].names.transliteration",
+      "ayah_no_surah": "numberInSurah",
+      "ayah_no_quran": "numberInQuran",
+      "ayah_ar": "arabic",
+      "ayah_en": "translations.en",
+      "ruko_no": "location.ruku.numberInQuran",
+      "juz_no": "location.juz",
+      "manzil_no": "location.manzil",
+      "hizb_quarter": "location.hizbQuarter",
+      "place_of_revelation": "surahs[].revelationType",
+      "sajah_ayah": "sajdah.isMarked",
+      "sajdah_no": "sajdah.number (omit when NA)",
+      "list_of_words": "words[] (strip brackets, split on commas, trim each token)"
+    },
+    "urduCsv": {
+      "format": "surah_no|ayah_no_surah|translation",
+      "translation": "translations.ur"
+    },
+    "derived": {
+      "id": "${surahId}:${numberInSurah}",
+      "location.ruku.numberInSurah": "Ordinal of each distinct ruko_no within its surah",
+      "words[].position": "1-based position after tokenization"
+    },
+    "projectAdapter": {
+      "activeSurah.id": "surah.id",
+      "activeSurah.name": "surah.names.transliteration",
+      "activeSurah.arabicName": "surah.names.arabic",
+      "activeSurah.meaning": "surah.names.english",
+      "activeSurah.ruku": "ayah.location.ruku.numberInSurah",
+      "activeSurah.verses[]": {
+        "n": "ayah.numberInSurah",
+        "ar": "ayah.arabic",
+        "en": "ayah.translations.en",
+        "ur": "ayah.translations.ur",
+        "words": "ayah.words.map(word => [word.arabic, word.gloss?.en || ''])"
+      }
+    }
+  }
+}
