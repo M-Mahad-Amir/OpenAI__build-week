@@ -1,11 +1,11 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Replace this with your actual Gemini API Key
-const API_KEY = ""; 
+const API_KEY = "";
 const genAI = new GoogleGenerativeAI(API_KEY);
 
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash", //  Updated
+  model: "gemini-3.5-flash", //  Updated
   generationConfig: {
     responseMimeType: "application/json"
   }
@@ -109,7 +109,7 @@ export async function generateDynamicVocabulary(versesArray) {
 }
 
 export async function askGeminiAboutLesson(userQuery, lessonContent, surahName, rukuNumber) {
-  const customModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const customModel = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });  // Updated
   const prompt = `
     You are an authentic, precise AI Quran study companion.
     The user is studying Surah: "${surahName}", Ruku: ${rukuNumber}.
