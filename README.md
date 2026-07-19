@@ -1,4 +1,4 @@
-# NoorPath — Quran learning app
+# NoorPath — Quran learning app - Team Hackathon Project
 
 A browser-based Quran learning prototype. Quran text, English translation, Urdu translation, verse metadata, and ruku selection are loaded locally from `data/quran.json`; learner progress stays in browser `localStorage`. Gemini is optional and is used only for AI summaries, quizzes, contextual explanations, and the Ask AI panel.
 
