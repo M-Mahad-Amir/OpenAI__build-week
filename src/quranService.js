@@ -97,3 +97,15 @@ export function createStudyContext(study, { ayahNumber } = {}) {
     }))
   };
 }
+
+// Resolves a (surahId, ayahNumber) pair to the ayah's global ruku number (1–556).
+// Used by the reading nav and Hifz picker to jump to the correct ruku from any ayah.
+export async function findGlobalRukuForAyah(surahId, ayahNumber) {
+  const corpus = await loadQuranCorpus();
+  const ayah = corpus.ayahs.find(
+    a => a.surahId === Number(surahId) && a.numberInSurah === Number(ayahNumber)
+  );
+  if (!ayah) throw new Error(`Ayah ${surahId}:${ayahNumber} was not found in the local corpus.`);
+  return ayah.location.ruku.numberInQuran;
+}
+

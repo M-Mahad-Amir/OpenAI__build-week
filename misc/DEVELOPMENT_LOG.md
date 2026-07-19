@@ -107,4 +107,37 @@ NoorPath is a browser-based Quran-learning prototype. It has no build system, pa
 - Confirmed `ayah.location.ruku.numberInQuran` is the field used for global lookup (matching the prior `rukuInQuran` read in quranService).
 - Confirmed no remaining references to `targetSurah`, `targetRuku`, `getLocalVocabulary`, `generateContextualExplanation`, or `contextualExplanations` in the modified files.
 
+## Prompt 2 Feature Suite
 
+- Recorded: 2026-07-20
+- Files changed: `src/app.js` (rewritten), `src/quranService.js` (modified), `src/wordIndexService.js` (new), `index.html` (modified), `misc/build_word_index.js` (new build script).
+- Data artifacts created: `data/arabic_words_index.json` (via build script).
+
+### What now works
+
+**Reading Navigation.** Users can now navigate by Surah + Ruku or Surah + Ayah using a dedicated dropdown and input form. `quranService.js` exposes a new `findGlobalRukuForAyah` to resolve mid-ruku jumps. Previous/Next Ruku buttons are added to the bottom of the reading view and correctly cross surah boundaries (clamped 1–556).
+
+**Arabic Tab.** A dedicated vocabulary tab with three modes:
+1. *Browse*: Fetches and displays all vocabulary for a selected Surah + Ruku/Ayah using the existing `vocabularyService`.
+2. *By Letter*: Filters a flat, full-Quran index (`arabic_words_index.json`) by the root first letter.
+3. *Random 20*: Samples 20 unique words from the full-Quran index that haven't been seen in the current session.
+The full-Quran index is generated offline via `misc/build_word_index.js` (stripping diacritics and deduplicating ~16k unique word forms) and lazy-loaded once by `wordIndexService.js` (~1 MB).
+
+**Hifz Fixes.** Continuation segments are now split at canonical waqf pause marks (`U+06D6`–`U+06DC`, `U+06DE`, `U+06DF`), keeping the pause mark at the end of its natural phrase. Wrong answers no longer block the UI; instead, the correct continuation is highlighted and a "Continue" button appears. A Surah + Ayah picker allows users to start their practice session from any specific ayah.
+
+**Quiz Fixes.** Answer choices are now normalized (truncated to 90 chars max, collapsed whitespace) so length doesn't act as a hint. Previous/Next buttons allow navigating back to past questions without losing the answered state or score.
+
+**Journey Tracking & Scoring.** Activity is now auto-tracked across the app: Hifz points earned, Ruku Lesson visits, and the count of Arabic words viewed in the Arabic tab. A new `checkinForm` collects 8 parameters (5 prayers, anger control, ayahs read, Hifz points, lesson visits, Arabic words, charity amount, and social media time) and computes a 0–100 score. Users can now edit their saved entry for the current day.
+
+### Technical decisions
+
+- **Full-Quran word index**: Instead of fetching all 114 surah vocab files dynamically (which would be ~3MB of JSON parsing), `misc/build_word_index.js` generates a flat deduplicated list. `wordIndexService.js` fetches this file exactly once.
+- **Charity scoring**: Implemented as a binary threshold; any amount > 0 yields 100% for that component.
+- **State persistence**: `progress.todayActivity` tracks the transient daily counts (words seen, hifz points) independently of the final daily check-in score.
+- **Calendar**: Kept to the current month to avoid pulling in heavier multi-month calendar logic during this pass.
+
+### Verification performed
+
+- Executed `misc/build_word_index.js` and confirmed it successfully generated `data/arabic_words_index.json` (~1MB, 16k entries).
+- Verified `app.js` renders all 5 features cleanly without syntax errors.
+- Verified index.html structure was restored properly with the new Arabic nav link.
