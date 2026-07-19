@@ -1,7 +1,8 @@
-import { getLocalVocabulary, getRuku, createStudyContext } from "./quranService.js";
+import { getRuku, createStudyContext } from "./quranService.js";
+import { getSurahTafsir } from "./tafsirService.js";
+import { getSurahWords } from "./vocabularyService.js";
 import {
   askGeminiAboutLesson,
-  generateContextualExplanation,
   generateDynamicQuiz,
   generateStudySummary,
   isGeminiConfigured
@@ -35,18 +36,24 @@ let state = {
   vocabQuestion: null,
   // Local corpus selection and optional AI UI state
   loading: false,
-  targetSurah: "Al-Fatihah",
-  targetRuku: 1,
+  targetGlobalRuku: 1,
   activeSurah: null,
   quizBank: [],
   vocabBank: [],
-  contextualExplanations: {},
-  contextualLoadingAyah: null,
   summaryLoading: false,
   quizLoading: false
 };
 
 const escape = (value = "") => String(value).replace(/[&<>'"]/g, char => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "'":"&#39;", '"':"&quot;" })[char]);
+const renderMarkdown = (text = "") => {
+  const safe = escape(String(text));
+  return safe
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.*?)\*/g, "<em>$1</em>")
+    .split(/\n\n+/)
+    .map(para => `<p>${para.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+};
 const shuffle = array => [...array].sort(() => Math.random() - 0.5);
 const today = () => new Date().toISOString().slice(0, 10);
 const persist = () => { try { localStorage.setItem(storeKey, JSON.stringify(progress)); } catch { toast("Your browser could not save progress locally."); } };
@@ -55,20 +62,54 @@ const points = () => Object.values(progress.daily).reduce((sum, item) => sum + (
 const setHeading = (title, crumb) => { $("#view-title").textContent = title; $("#crumb").textContent = crumb; $("#points-total").textContent = points(); };
 const ayahSegments = () => state.activeSurah ? state.activeSurah.verses.map(v => v.ar.split(" ").slice(0, 4).join(" ")) : [];
 
-// Quran text, translations, verse metadata, and ruku selection are always local.
+// Quran text, translations, tafsir, and word-by-word data are all sourced locally.
 async function loadLocalStudyData() {
   state.loading = true;
   render();
   try {
-    state.activeSurah = await getRuku(state.targetSurah, state.targetRuku);
-    state.vocabBank = getLocalVocabulary(state.activeSurah);
+    state.activeSurah = await getRuku(state.targetGlobalRuku);
+
+    // Load vocabulary and tafsir for the active surah in parallel; failures are non-fatal.
+    const surahId = state.activeSurah.id;
+    const [wordsResult, tafsirResult] = await Promise.allSettled([
+      getSurahWords(surahId),
+      getSurahTafsir(surahId)
+    ]);
+
+    // Populate verse words from the local word-by-word dataset.
+    if (wordsResult.status === "fulfilled") {
+      const words = wordsResult.value;
+      state.activeSurah.verses.forEach(v => {
+        const ayahWords = words[String(v.n)] || [];
+        v.words = ayahWords.map(w => [w.arabic, w.translation]);
+      });
+      // Build vocab bank: unique words from this ruku for the quiz.
+      const seen = new Set();
+      state.vocabBank = state.activeSurah.verses.flatMap(v =>
+        (words[String(v.n)] || []).map(w => ({
+          ar: w.arabic,
+          translit: "",
+          meaning: w.translation,
+          frequency: `Ayah ${v.n}`
+        }))
+      ).filter(w => { if (seen.has(w.ar)) return false; seen.add(w.ar); return true; });
+    } else {
+      console.warn("Arabic words could not be loaded:", wordsResult.reason);
+      state.vocabBank = [];
+    }
+
+    // Attach tafsir data; null signals load failure (views handle this gracefully).
+    state.activeSurah.tafsir = tafsirResult.status === "fulfilled" ? tafsirResult.value : null;
+    if (tafsirResult.status === "rejected") {
+      console.warn("Tafsir could not be loaded:", tafsirResult.reason);
+    }
+
     state.vocabQuestion = null;
     state.quizBank = [];
     newLessonQuiz();
     state.tafsirAyah = null;
     state.hifzIndex = 0;
     state.hifzChoices = [];
-    state.contextualExplanations = {};
   } catch (error) {
     console.error("Failed to load the local Quran corpus:", error);
     toast(error.message || "Could not load the local Quran corpus.");
@@ -80,22 +121,21 @@ async function loadLocalStudyData() {
 
 function readingView() {
   if (!state.activeSurah) return;
-  setHeading("Read with presence", `QURAN · ${state.activeSurah.name.toUpperCase()}`);
+  setHeading("Read with presence", `QURAN · ${state.activeSurah.name.toUpperCase()} · RUKU ${state.activeSurah.rukuInQuran}`);
   
   app.innerHTML = `
     <section class="hero">
-      <p>RUKU ${state.activeSurah.ruku} · ${state.activeSurah.verses.length} AYAHS · LOCAL QURAN CORPUS</p>
+      <p>GLOBAL RUKU ${state.activeSurah.rukuInQuran} · SURAH RUKU ${state.activeSurah.ruku} · ${state.activeSurah.verses.length} AYAHS · LOCAL QURAN CORPUS</p>
       <h2>${state.activeSurah.name} <span style="font-weight:400;font-size:18px">— ${state.activeSurah.meaning}</span></h2>
       <div class="arabic">${state.activeSurah.arabicName}</div>
     </section>
     
-    <!-- Added Interactive Surah & Ruku Selection Controls -->
+    <!-- Global Ruku Navigation -->
     <div class="card" style="margin-bottom: 20px; padding: 15px;">
-      <p class="section-label">STUDY ANOTHER PORTION</p>
+      <p class="section-label">NAVIGATE BY GLOBAL RUKU (1–556)</p>
       <form id="surah-loader-form" style="display: flex; gap: 10px; align-items: center;">
-        <input type="text" id="input-surah" class="field" value="${state.targetSurah}" placeholder="e.g. 'Al-Baqarah' or 'The Cow'" style="margin:0; flex: 2;" required />
-        <input type="number" id="input-ruku" class="field" value="${state.targetRuku}" min="1" max="40" style="margin:0; flex: 1;" required />
-        <button type="submit" class="button" style="padding: 10px 15px;">Load locally</button>
+        <input type="number" id="input-global-ruku" class="field" value="${state.targetGlobalRuku}" min="1" max="556" placeholder="Global ruku 1–556" style="margin:0; flex: 1;" required />
+        <button type="submit" class="button" style="padding: 10px 15px;">Load</button>
       </form>
     </div>
 
@@ -135,16 +175,15 @@ function readingView() {
 }
 
 function tafsirFor(n) {
-  const explanation = state.contextualExplanations[n];
-  const loading = state.contextualLoadingAyah === n;
+  const tafsirText = state.activeSurah.tafsir?.[String(n)]?.tafsir;
   return `
     <div class="tafsir">
-      <h4>Contextual explanation <span class="pill">Ayah ${n}</span></h4>
-      ${explanation
-        ? `<p>${escape(explanation)}</p><p class="source">AI-generated from the selected local ayah; not a substitute for verified tafsir.</p>`
-        : `<p>Generate an explanation limited to this locally loaded ayah and its translations.</p>
-           <button class="text-button" data-action="generate-context" data-ayah="${n}" ${loading ? "disabled" : ""}>${loading ? "Generating…" : "Generate contextual explanation"}</button>`}
-      <button class="text-button" data-action="to-lesson">Open grounded lesson →</button>
+      <h4>Tafsir <span class="pill">Ayah ${n}</span></h4>
+      ${tafsirText
+        ? `<p style="font-size: 0.88rem; line-height: 1.7; max-height: 300px; overflow-y: auto;">${escape(tafsirText)}</p>
+           <p class="source">Local tafsir dataset · not a substitute for primary scholarly sources.</p>`
+        : `<p>${state.activeSurah.tafsir ? "No tafsir entry found for this ayah." : "Tafsir could not be loaded for this surah."}</p>`}
+      <button class="text-button" data-action="to-lesson">Open full lesson →</button>
     </div>`;
 }
 
@@ -200,21 +239,44 @@ function lessonView() {
   setHeading("Learn the ruku", `GROUNDED LESSON · ${state.activeSurah.name.toUpperCase()}`);
   if (!state.lessonQuiz.length) newLessonQuiz();
   const current = state.lessonQuiz[state.quizIndex];
-  
+  const tafsirData = state.activeSurah.tafsir;
+  const firstAyah = state.activeSurah.verses[0].n;
+  const lastAyah = state.activeSurah.verses.at(-1).n;
+
   app.innerHTML = `
     <section class="hero">
-      <p>LESSON MODE · RUKU ${state.activeSurah.ruku} · LOCAL SOURCE</p>
+      <p>LESSON MODE · GLOBAL RUKU ${state.activeSurah.rukuInQuran} · LOCAL SOURCE</p>
       <h2>A locally grounded lesson on ${state.activeSurah.name}</h2>
     </section>
     <div class="lesson-grid">
-      <article class="card">
-        <p class="section-label">BACKGROUND</p>
-        <h2>${state.activeSurah.name}</h2>
-        <p>${escape(state.activeSurah.lesson.background)}</p>
-        <p class="section-label">SHORT SUMMARY</p>
-        <p>${escape(state.activeSurah.lesson.summary)}</p>
-        <div class="source-list">${state.activeSurah.lesson.sources.map(source => `<span class="source">${escape(source)}</span>`).join("")}</div>
-        <button class="text-button" data-action="generate-summary" ${state.summaryLoading ? "disabled" : ""}>${state.summaryLoading ? "Generating summary…" : "Generate AI summary"}</button>
+      <article class="card" style="overflow-y: auto; max-height: 75vh;">
+        <p class="section-label">LOCAL TAFSIR · AYAH BY AYAH</p>
+        <h2>${state.activeSurah.name} · Ayahs ${firstAyah}–${lastAyah}</h2>
+
+        ${state.activeSurah.verses.map(v => {
+          const text = tafsirData?.[String(v.n)]?.tafsir;
+          return `
+            <div style="margin-bottom: 20px; border-top: 1px solid var(--line); padding-top: 14px;">
+              <p class="section-label">AYAH ${v.n}</p>
+              <div class="ayah-ar" style="font-size: 1.2rem; margin-bottom: 6px;">${v.ar}</div>
+              <p class="translation" style="margin-bottom: 10px;">${escape(v.en)}</p>
+              ${text
+                ? `<p style="font-size: 0.87rem; line-height: 1.75;">${escape(text)}</p>`
+                : `<p class="source">${tafsirData ? "No tafsir entry for this ayah." : "Tafsir could not be loaded."}</p>`}
+            </div>`;
+        }).join("")}
+
+        ${state.activeSurah.lesson.summary ? `
+          <div style="border-top: 1px solid var(--line); margin-top: 20px; padding-top: 16px;">
+            <p class="section-label">AI OVERVIEW</p>
+            ${renderMarkdown(state.activeSurah.lesson.summary)}
+            <div class="source-list">${state.activeSurah.lesson.sources.map(s => `<span class="source">${escape(s)}</span>`).join("")}</div>
+          </div>
+        ` : ""}
+
+        <button class="text-button" data-action="generate-summary" ${state.summaryLoading ? "disabled" : ""} style="margin-top: 15px;">
+          ${state.summaryLoading ? "Generating overview…" : "Generate AI overview"}
+        </button>
       </article>
       <article class="card">
         <p class="section-label">RUKU QUIZ · AI-GENERATED</p>
@@ -246,11 +308,11 @@ function lessonView() {
 function vocabularyView() {
   if (!state.activeSurah) return;
   if (!state.vocabBank.length) {
-    setHeading("Arabic, one word at a time", "VOCABULARY · LOCAL GLOSSARY");
-    app.innerHTML = `<section class="card"><p class="section-label">LOCAL GLOSSARY</p><h2>No matched glossary terms for this ruku yet</h2><p>The imported datasets include Arabic tokens but no licensed word-by-word translations. Add a reviewed glossary or morphology dataset to extend this view.</p></section>`;
+    setHeading("Arabic, one word at a time", "VOCABULARY · LOCAL DATASET");
+    app.innerHTML = `<section class="card"><p class="section-label">LOCAL DATASET</p><h2>No vocabulary loaded for this ruku</h2><p>The word-by-word dataset could not be loaded or has no entries for this ruku.</p></section>`;
     return;
   }
-  setHeading("Arabic, one word at a time", "VOCABULARY · HIGH-VALUE WORDS");
+  setHeading("Arabic, one word at a time", "VOCABULARY · WORD BY WORD");
   
   if (!state.vocabQuestion) { 
     const word = state.vocabBank[Math.floor(Math.random() * state.vocabBank.length)]; 
@@ -264,15 +326,15 @@ function vocabularyView() {
   app.innerHTML = `
     <section class="grid-2">
       <article class="card">
-        <p class="section-label">CORE RUKU VOCABULARY</p>
-        <h2>Recognize the building blocks</h2>
-        <p>These reviewed local glossary terms appear in the selected ruku. The imported datasets do not include a complete word-by-word translation layer.</p>
+        <p class="section-label">RUKU VOCABULARY</p>
+        <h2>Words from this ruku</h2>
+        <p>Word-by-word translations from the local dataset for the active ruku.</p>
         <div>
           ${state.vocabBank.map(w => `
             <div class="vocab-card">
               <div class="vocab-ar">${w.ar}</div>
               <div>
-                <strong>${w.translit}</strong>
+                ${w.translit ? `<strong>${w.translit}</strong>` : ""}
                 <p>${w.frequency}</p>
               </div>
               <span class="pill">${w.meaning}</span>
@@ -312,7 +374,7 @@ function progressView() {
         <p class="section-label">${saved ? "TODAY IS SAVED" : "DAILY CHECK-IN"}</p>
         <h2>How did today go?</h2>
         <p>For each salah: mosque = 3, home = 2, qaza = 1, missed = 0.</p>
-        ${saved ? `<div class="notice">Today’s score is <strong>${saved.score}/100</strong>. You can return tomorrow for the next check-in.</div>` : checkinForm()}
+        ${saved ? `<div class="notice">Today's score is <strong>${saved.score}/100</strong>. You can return tomorrow for the next check-in.</div>` : checkinForm()}
         <button class="text-button" data-action="enable-reminder">Enable 11pm reminder</button>
       </article>
       <article class="card">
@@ -323,7 +385,7 @@ function progressView() {
     </section>`;
 }
 
-function checkinForm() { const prayers = ["Fajr","Dhuhr","Asr","Maghrib","Isha"]; return `<form id="checkin-form"><div class="checkin-grid">${prayers.map(p => `<div class="prayer"><label>${p}</label><select name="${p}"><option value="3">Mosque</option><option value="2">Home</option><option value="1">Qaza</option><option value="0">Missed</option></select></div>`).join("")}</div><div class="field"><label for="anger">Anger control (1 = struggled, 5 = excellent)</label><select id="anger" name="anger">${[1,2,3,4,5].map(n => `<option value="${n}" ${n === 3 ? "selected" : ""}>${n} / 5</option>`).join("")}</select></div><div class="field"><label for="ayahs">Ayahs read today</label><input id="ayahs" name="ayahs" type="number" min="0" max="1000" value="0" required></div><div class="field"><label for="hifz-count">Correct Hifz continuations today</label><input id="hifz-count" name="hifz" type="number" min="0" max="1000" value="0" required></div><button class="button gold">Save today’s score</button></form>`; }
+function checkinForm() { const prayers = ["Fajr","Dhuhr","Asr","Maghrib","Isha"]; return `<form id="checkin-form"><div class="checkin-grid">${prayers.map(p => `<div class="prayer"><label>${p}</label><select name="${p}"><option value="3">Mosque</option><option value="2">Home</option><option value="1">Qaza</option><option value="0">Missed</option></select></div>`).join("")}</div><div class="field"><label for="anger">Anger control (1 = struggled, 5 = excellent)</label><select id="anger" name="anger">${[1,2,3,4,5].map(n => `<option value="${n}" ${n === 3 ? "selected" : ""}>${n} / 5</option>`).join("")}</select></div><div class="field"><label for="ayahs">Ayahs read today</label><input id="ayahs" name="ayahs" type="number" min="0" max="1000" value="0" required></div><div class="field"><label for="hifz-count">Correct Hifz continuations today</label><input id="hifz-count" name="hifz" type="number" min="0" max="1000" value="0" required></div><button class="button gold">Save today's score</button></form>`; }
 
 function render() { 
   try { 
@@ -332,7 +394,7 @@ function render() {
         <div class="card empty" style="padding: 50px 20px;">
           <div class="brand-mark" style="margin: 0 auto 20px; font-size: 32px; width: 50px; height: 50px;">ن</div>
           <h2>Loading the local Quran corpus…</h2>
-          <p>Retrieving Surah ${state.targetSurah}, ruku ${state.targetRuku}, and its imported translations.</p>
+          <p>Retrieving global ruku ${state.targetGlobalRuku} from the local corpus.</p>
         </div>`;
       return;
     }
@@ -364,7 +426,6 @@ document.addEventListener("click", event => {
     if (action === "quiz-answer") answerQuiz(button);
     if (action === "refresh-quiz") generateQuiz();
     if (action === "generate-summary") generateSummary();
-    if (action === "generate-context") generateContext(Number(button.dataset.ayah));
     if (action === "vocab-answer") answerVocab(button);
     if (action === "next-vocab") { state.vocabQuestion = null; render(); }
     if (action === "enable-reminder") enableReminder();
@@ -386,9 +447,13 @@ document.addEventListener("submit", event => {
       saveCheckin(new FormData(event.target)); 
     }
     if (event.target.id === "surah-loader-form") {
-      state.targetSurah = $("#input-surah").value;
-      state.targetRuku = Number($("#input-ruku").value);
-      loadLocalStudyData();
+      const val = Number($("#input-global-ruku").value);
+      if (val >= 1 && val <= 556) {
+        state.targetGlobalRuku = val;
+        loadLocalStudyData();
+      } else {
+        toast("Please enter a global ruku number between 1 and 556.");
+      }
     }
   } catch (error) { 
     console.error(error); 
@@ -420,7 +485,7 @@ function answerQuiz(button) {
   if (!correct) [...document.querySelectorAll(".quiz-option")].find(x => x.dataset.choice === q.a)?.classList.add("correct"); 
   if (correct) state.quizScore++; 
   const out = $("#quiz-feedback"); 
-  out.innerHTML = `<div class="feedback">${correct ? "Correct." : "Not quite."} This is grounded in the selected ruku’s lesson material.</div>`; 
+  out.innerHTML = `<div class="feedback">${correct ? "Correct." : "Not quite."} This is grounded in the selected ruku's lesson material.</div>`; 
   if (state.quizIndex < 4) {
     setTimeout(() => { state.quizIndex++; render(); }, 1100); 
   } else {
@@ -443,9 +508,8 @@ async function generateSummary() {
     const summary = await generateStudySummary(createStudyContext(state.activeSurah));
     state.activeSurah.lesson = {
       ...state.activeSurah.lesson,
-      background: summary.background,
-      summary: summary.summary,
-      sources: [...state.activeSurah.lesson.sources, "AI summary constrained to the selected local ruku"]
+      summary: summary.summary || summary.background || "",
+      sources: [...state.activeSurah.lesson.sources, "AI overview constrained to the selected local ruku"]
     };
   } catch (error) {
     console.error("Could not generate AI summary:", error);
@@ -474,23 +538,6 @@ async function generateQuiz() {
   }
 }
 
-async function generateContext(ayahNumber) {
-  if (!isGeminiConfigured()) return toast("Paste your Gemini API key in src/geminiService.js to generate contextual explanations.");
-  state.contextualLoadingAyah = ayahNumber;
-  render();
-  try {
-    state.contextualExplanations[ayahNumber] = await generateContextualExplanation(
-      createStudyContext(state.activeSurah, { ayahNumber })
-    );
-  } catch (error) {
-    console.error("Could not generate contextual explanation:", error);
-    toast("Could not generate the contextual explanation. Check the key and Gemini settings.");
-  } finally {
-    state.contextualLoadingAyah = null;
-    render();
-  }
-}
-
 // AI Assistant is constrained to the local ruku currently on screen.
 async function askAI(question) {
   if (!isGeminiConfigured()) return toast("Paste your Gemini API key in src/geminiService.js to use the AI Assistant.");
@@ -500,7 +547,8 @@ async function askAI(question) {
     const response = await askGeminiAboutLesson(question, createStudyContext(state.activeSurah));
     outputDiv.innerHTML = `
       <div class="ask-answer">
-        <strong>Grounded answer</strong><br>${escape(response)}<br>
+        <strong>Grounded answer</strong>
+        ${renderMarkdown(response)}
         <span class="source">Source: locally loaded ${state.activeSurah.name}, ruku ${state.activeSurah.ruku}</span>
       </div>`;
   } catch (error) {

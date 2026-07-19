@@ -1,19 +1,9 @@
-import { LOCAL_VOCABULARY } from "./data.js";
-
 const corpusUrl = new URL("../data/quran.json", import.meta.url);
 let corpusPromise;
 
 const normalizeSearch = value => String(value || "")
   .toLocaleLowerCase()
   .replace(/[^\p{L}\p{N}]/gu, "");
-
-const normalizeArabic = value => String(value || "")
-  .replace(/[\u064B-\u065F\u0670]/g, "")
-  .replace(/[ٱأإآ]/g, "ا")
-  .replace(/ى/g, "ي")
-  .replace(/ة/g, "ه");
-
-const glossaryByWord = new Map(LOCAL_VOCABULARY.flatMap(entry => entry.forms.map(form => [form, entry])));
 
 export async function loadQuranCorpus() {
   if (!corpusPromise) {
@@ -45,16 +35,22 @@ export async function getSurah(surahReference) {
     : corpus.surahs.find(item => [item.names.transliteration, item.names.english, item.names.arabic]
       .some(name => normalizeSearch(name) === query));
 
-  if (!surah) throw new Error(`Surah “${surahReference}” was not found in the local corpus.`);
+  if (!surah) throw new Error(`Surah "${surahReference}" was not found in the local corpus.`);
   return surah;
 }
 
-export async function getRuku(surahReference, rukuNumber) {
-  const [corpus, surah] = await Promise.all([loadQuranCorpus(), getSurah(surahReference)]);
-  const ruku = Number(rukuNumber);
-  const ayahs = corpus.ayahs.filter(ayah => ayah.surahId === surah.id && ayah.location.ruku.numberInSurah === ruku);
+// Returns all ayahs belonging to a global ruku number (1–556).
+// Word-by-word glosses and tafsir are resolved by vocabularyService / tafsirService in app.js.
+export async function getRuku(globalRukuNumber) {
+  const corpus = await loadQuranCorpus();
+  const ruku = Number(globalRukuNumber);
+  const ayahs = corpus.ayahs.filter(ayah => ayah.location.ruku.numberInQuran === ruku);
 
-  if (!ayahs.length) throw new Error(`${surah.names.transliteration} does not have ruku ${ruku}.`);
+  if (!ayahs.length) throw new Error(`Global ruku ${ruku} was not found in the local corpus.`);
+
+  const surahId = ayahs[0].surahId;
+  const surah = corpus.surahs.find(s => s.id === surahId);
+  if (!surah) throw new Error(`Surah for global ruku ${ruku} was not found in the local corpus.`);
 
   const verses = ayahs.map(ayah => ({
     id: ayah.id,
@@ -62,10 +58,7 @@ export async function getRuku(surahReference, rukuNumber) {
     ar: ayah.arabic,
     en: ayah.translations.en,
     ur: ayah.translations.ur,
-    words: ayah.words.map(word => {
-      const glossary = glossaryByWord.get(normalizeArabic(word.arabic));
-      return [word.arabic, glossary?.meaning || "Gloss unavailable in this local corpus"];
-    }),
+    words: ayah.words.map(word => [word.arabic, ""]), // populated by vocabularyService after load
     location: ayah.location,
     sajdah: ayah.sajdah
   }));
@@ -76,20 +69,16 @@ export async function getRuku(surahReference, rukuNumber) {
     arabicName: surah.names.arabic,
     meaning: surah.names.english,
     revelationType: surah.revelationType,
-    ruku,
-    rukuInQuran: ayahs[0].location.ruku.numberInQuran,
+    ruku: ayahs[0].location.ruku.numberInSurah,
+    rukuInQuran: ruku,
     verses,
+    tafsir: null, // populated by tafsirService after load
     lesson: {
-      background: `${surah.names.transliteration}, ruku ${ruku}, contains ayahs ${verses[0].n}–${verses.at(-1).n}. The Quran text and English/Urdu translations below are loaded from the local corpus.`,
-      summary: "Generate an AI summary when you want a contextual study aid; the canonical verses remain local and unchanged.",
+      background: "",
+      summary: "",
       sources: ["Local Quran corpus", "English and Urdu translations supplied with the imported datasets"]
     }
   };
-}
-
-export function getLocalVocabulary(study) {
-  const includedWords = new Set(study.verses.flatMap(verse => verse.words.map(([arabic]) => normalizeArabic(arabic))));
-  return LOCAL_VOCABULARY.filter(entry => entry.forms.some(form => includedWords.has(form)));
 }
 
 export function createStudyContext(study, { ayahNumber } = {}) {

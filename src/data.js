@@ -1,6 +1,6 @@
-// Optional local word glossary. The imported CSVs contain Arabic tokenization,
-// but not licensed word-by-word translations, so terms absent from this list
-// are intentionally shown without a guessed gloss.
+// DEPRECATED — no longer imported. Word-by-word glosses are now sourced from
+// data/arabic_words/<surahId>.json via src/vocabularyService.js.
+// Retained for reference only; safe to delete in a future cleanup pass.
 export const LOCAL_VOCABULARY = [
   { forms: ["الله"], ar: "اللَّه", translit: "Allah", meaning: "God", frequency: "Core Quran word" },
   { forms: ["رب"], ar: "رَبّ", translit: "Rabb", meaning: "Lord / Sustainer", frequency: "Core Quran word" },

@@ -69,3 +69,42 @@ NoorPath is a browser-based Quran-learning prototype. It has no build system, pa
 - Parsed `data/quran.json` successfully and confirmed its aggregate counts, source manifest, first ID (`1:1`), and last ID (`114:6`).
 - Confirmed the current worktree had no pre-existing changes before creating this file.
 
+
+## Foundation Phase 1 refactor
+
+- Recorded: 2026-07-19
+- Files changed: `src/quranService.js` (modified), `src/app.js` (modified), `src/tafsirService.js` (new), `src/vocabularyService.js` (new), `src/data.js` (deprecation notice added).
+
+### What now works
+
+**Global Ruku lookup.** `quranService.getRuku(globalRukuNumber)` now filters `corpus.ayahs` on `ayah.location.ruku.numberInQuran` (1–556) instead of `ayah.location.ruku.numberInSurah`. The returned object exposes both `ruku` (per-surah ordinal, for display) and `rukuInQuran` (the canonical global number). Reading, Hifz, Quiz, Vocabulary, and Lesson all consume this single lookup. No hardcoded ruku counts or ranges remain in the codebase.
+
+**tafsirService.js.** Lazy-loads `data/tafsir/<surahId>.json` on first access per surah and resolves a cached Promise on subsequent calls. Failures propagate so `app.js` can treat them as non-fatal. Exported surface: `getSurahTafsir(surahId)`.
+
+**vocabularyService.js.** Lazy-loads `data/arabic_words/<surahId>.json` with the same caching pattern. Exported surface: `getSurahWords(surahId)`.
+
+**Local tafsir displayed in Reading and Lesson.** After a ruku loads, `app.js` attaches `activeSurah.tafsir` from `tafsirService`. In Reading mode the "Tafsir" toggle on each ayah now shows the local tafsir entry (max-height 300 px scrollable) instead of an AI-generate button. In Lesson mode the left card shows each ayah's Arabic, English translation, and full local tafsir entry, with the optional AI overview section (rendered markdown) appended below if one has been generated.
+
+**Vocabulary from local word-by-word dataset.** `app.js` calls `getSurahWords` in parallel with tafsir. Verse words are populated from the dataset (`[arabic, translation]` pairs). The vocab bank is built from unique Arabic words across the active ruku, mapped to `{ ar, meaning, frequency }` for the existing quiz logic. The 9-term glossary in `data.js` is no longer imported anywhere.
+
+**Markdown rendering for AI outputs.** A `renderMarkdown(text)` helper HTML-escapes the source, then promotes `**text**` → `<strong>` and `*text*` → `<em>`, and splits on double newlines into `<p>` blocks. Applied to AI overview in Lesson, AI answers in Ask AI panel.
+
+**Context-window text leak removed.** The `lesson.background` and `lesson.summary` placeholder strings from `quranService` no longer appear in the lesson panel. The background field is now empty (`""`); the summary is only populated if the user explicitly generates an AI overview.
+
+**`generateContextualExplanation` retired.** The per-ayah AI explanation button and the `generateContext` function are removed. Local tafsir replaces them for every ayah. The `generateContextualExplanation` import from `geminiService.js` is also removed from `app.js`; `geminiService.js` itself is unchanged.
+
+### Technical decisions
+
+- `Promise.allSettled` used for parallel vocabulary + tafsir fetch so a single failing dataset never blocks the Quran text from rendering.
+- `activeSurah.tafsir === null` is the sentinel for a failed tafsir load; views use this to show a contextual fallback message rather than crashing.
+- `data.js` is kept on disk with a deprecation comment; it is not imported anywhere.
+- `quranService.js` no longer imports `data.js` or `normalizeArabic`; the `getLocalVocabulary` export is removed.
+
+### Verification performed
+
+- Reviewed all five modified/created files for correctness.
+- Confirmed all 114 `data/tafsir/*.json` and `data/arabic_words/*.json` files are present in the repository.
+- Confirmed `ayah.location.ruku.numberInQuran` is the field used for global lookup (matching the prior `rukuInQuran` read in quranService).
+- Confirmed no remaining references to `targetSurah`, `targetRuku`, `getLocalVocabulary`, `generateContextualExplanation`, or `contextualExplanations` in the modified files.
+
+
