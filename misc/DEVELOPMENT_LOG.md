@@ -62,6 +62,9 @@ NoorPath is a browser-based Quran-learning prototype. It has no build system, pa
 | 2026-07-17 | `a573e98` | Updated the configured Gemini model name. |
 | 2026-07-17 | `c2ccb77` | Replaced sample Quran data with the normalized local full-corpus JSON, added the schema and corpus service, and refactored the UI and Gemini data handling around that boundary. |
 | 2026-07-19 | `0758a30` | Updated README documentation to describe the local-corpus architecture, optional AI boundary, score, and production requirements. |
+| 2026-07-19 | `b691627` | Refactored quranService global ruku lookup; added lazy-loaded vocabularyService and tafsirService. |
+| 2026-07-20 | `e7af60c` | Added findGlobalRukuForAyah, build_word_index script, wordIndexService, and initial Prompt 2 structures in app.js. |
+| 2026-07-20 | `6b5948b` | Implemented full ruku navigation, Hifz improvements, Arabic tab modes, quiz overrides, and check-in score editing. Added overrides.css for RTL. |
 
 ## Verification recorded for this entry
 
@@ -73,6 +76,7 @@ NoorPath is a browser-based Quran-learning prototype. It has no build system, pa
 ## Foundation Phase 1 refactor
 
 - Recorded: 2026-07-19
+- Commit: `b69162740ffd0548040f662ea0046e47347f5af7`
 - Files changed: `src/quranService.js` (modified), `src/app.js` (modified), `src/tafsirService.js` (new), `src/vocabularyService.js` (new), `src/data.js` (deprecation notice added).
 
 ### What now works
@@ -110,7 +114,8 @@ NoorPath is a browser-based Quran-learning prototype. It has no build system, pa
 ## Prompt 2 Feature Suite
 
 - Recorded: 2026-07-20
-- Files changed: `src/app.js` (rewritten), `src/quranService.js` (modified), `src/wordIndexService.js` (new), `index.html` (modified), `misc/build_word_index.js` (new build script).
+- Commits: `e7af60cd39e920446635f66a0f06d9406c16ad0a` and `6b5948b8b36268954dc01e82b0bac3ef851a43c3`
+- Files changed: `src/app.js` (rewritten), `src/quranService.js` (modified), `src/wordIndexService.js` (new), `index.html` (modified), `misc/build_word_index.js` (new build script), `src/overrides.css` (new overrides styling), `src/geminiService.js` (modified).
 - Data artifacts created: `data/arabic_words_index.json` (via build script).
 
 ### What now works
@@ -123,11 +128,15 @@ NoorPath is a browser-based Quran-learning prototype. It has no build system, pa
 3. *Random 20*: Samples 20 unique words from the full-Quran index that haven't been seen in the current session.
 The full-Quran index is generated offline via `misc/build_word_index.js` (stripping diacritics and deduplicating ~16k unique word forms) and lazy-loaded once by `wordIndexService.js` (~1 MB).
 
+**Arabic Direction & RTL Styling.** Added `src/overrides.css` to properly align word chips and display lists in Right-to-Left (RTL) flow for native Arabic reading. Loaded this stylesheet in `index.html`.
+
 **Hifz Fixes.** Continuation segments are now split at canonical waqf pause marks (`U+06D6`–`U+06DC`, `U+06DE`, `U+06DF`), keeping the pause mark at the end of its natural phrase. Wrong answers no longer block the UI; instead, the correct continuation is highlighted and a "Continue" button appears. A Surah + Ayah picker allows users to start their practice session from any specific ayah.
 
 **Quiz Fixes.** Answer choices are now normalized (truncated to 90 chars max, collapsed whitespace) so length doesn't act as a hint. Previous/Next buttons allow navigating back to past questions without losing the answered state or score.
 
 **Journey Tracking & Scoring.** Activity is now auto-tracked across the app: Hifz points earned, Ruku Lesson visits, and the count of Arabic words viewed in the Arabic tab. A new `checkinForm` collects 8 parameters (5 prayers, anger control, ayahs read, Hifz points, lesson visits, Arabic words, charity amount, and social media time) and computes a 0–100 score. Users can now edit their saved entry for the current day.
+
+**AI Excerpt Grounding & Prompt Updates.** Refined AI prompts and study context in `src/geminiService.js` and `src/quranService.js`. The AI context is strictly constrained to the local tafsir excerpts (English and Urdu translations are no longer passed to the AI to prevent translation hallucinations), forcing the model to generate summaries, quizzes, and Q&A strictly from the provided tafsir text.
 
 ### Technical decisions
 
@@ -141,3 +150,5 @@ The full-Quran index is generated offline via `misc/build_word_index.js` (stripp
 - Executed `misc/build_word_index.js` and confirmed it successfully generated `data/arabic_words_index.json` (~1MB, 16k entries).
 - Verified `app.js` renders all 5 features cleanly without syntax errors.
 - Verified index.html structure was restored properly with the new Arabic nav link.
+- Verified right-to-left layout constraints using overrides.css.
+- Checked git status to ensure working directory matches commit history clean baseline.
