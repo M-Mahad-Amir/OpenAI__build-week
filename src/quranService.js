@@ -88,12 +88,11 @@ export function createStudyContext(study, { ayahNumber } = {}) {
   return {
     surah: study.name,
     ruku: study.ruku,
-    source: "Local Quran corpus (Arabic text with imported English and Urdu translations)",
+    source: "Locally loaded tafsir for the selected ruku",
     verses: verses.map(verse => ({
       ayah: verse.n,
       arabic: verse.ar,
-      english: verse.en,
-      urdu: verse.ur
+      tafsir: study.tafsir?.[String(verse.n)]?.tafsir || "No tafsir entry is available for this ayah."
     }))
   };
 }
@@ -108,4 +107,3 @@ export async function findGlobalRukuForAyah(surahId, ayahNumber) {
   if (!ayah) throw new Error(`Ayah ${surahId}:${ayahNumber} was not found in the local corpus.`);
   return ayah.location.ruku.numberInQuran;
 }
-

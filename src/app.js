@@ -1,4 +1,4 @@
-import { getRuku, createStudyContext, loadQuranCorpus, findGlobalRukuForAyah } from "./quranService.js";
+import { getRuku, createStudyContext, loadQuranCorpus } from "./quranService.js";
 import { getSurahTafsir } from "./tafsirService.js";
 import { getSurahWords } from "./vocabularyService.js";
 import { getWordIndex } from "./wordIndexService.js";
@@ -38,8 +38,10 @@ let state = {
   targetGlobalRuku: 1,
   activeSurah: null,
   surahList: [],          // [{id, name}] populated after first corpus load
+  surahRukus: {},         // {surahId: [{number, firstAyah, lastAyah, globalNumber}]}
   vocabBank: [],
   vocabQuestion: null,
+  vocabAyahIndex: 0,
   summaryLoading: false,
   quizLoading: false,
 
@@ -49,7 +51,7 @@ let state = {
   navInput: 1,
 
   // Feature 2 — Arabic tab
-  arabicMode: "browse",   // "browse" | "letter" | "random"
+  arabicMode: "ruku",     // "ruku" | "letter" | "random"
   arabicSurahId: 1,
   arabicInputMode: "ruku",// "ruku" | "ayah" within browse
   arabicInput: 1,
@@ -67,8 +69,7 @@ let state = {
   hifzSegments: [],       // [{text, ayah}] waqf-split across all ruku verses
   hifzLastAnswered: null, // {chosen, correct, wasCorrect} — drives highlighted render
   hifzPickerSurahId: 1,
-  hifzPickerAyah: 1,
-  hifzStartFromAyah: null,// set before loadLocalStudyData to seek to an ayah's segment
+  hifzPickerRuku: 1,
 
   // Feature 4 — Quiz
   lessonQuiz: [],
@@ -123,6 +124,29 @@ function surahDropdownOptions(selectedId) {
   ).join("");
 }
 
+function buildSurahRukus(corpus) {
+  const grouped = {};
+  corpus.ayahs.forEach(ayah => {
+    const sid = ayah.surahId;
+    const number = ayah.location.ruku.numberInSurah;
+    const existing = grouped[sid]?.find(r => r.number === number);
+    if (existing) existing.lastAyah = ayah.numberInSurah;
+    else (grouped[sid] ||= []).push({
+      number,
+      firstAyah: ayah.numberInSurah,
+      lastAyah: ayah.numberInSurah,
+      globalNumber: ayah.location.ruku.numberInQuran
+    });
+  });
+  return grouped;
+}
+
+function rukuDropdownOptions(surahId, selectedRuku) {
+  return (state.surahRukus[Number(surahId)] || []).map(r =>
+    `<option value="${r.number}" ${r.number === Number(selectedRuku) ? "selected" : ""}>Ruku ${r.number}: Verses ${r.firstAyah} to ${r.lastAyah}</option>`
+  ).join("");
+}
+
 // ── Daily activity tracking ──────────────────────────────────────────────────
 function initTodayActivity() {
   const t = today();
@@ -136,11 +160,21 @@ function initTodayActivity() {
 // Marks confirmed in corpus: U+06D6–U+06DC, U+06DE, U+06DF.
 // Each mark is kept at the END of its preceding segment (the natural pause unit).
 function getWaqfSegments(verses) {
-  const MARKER = "\x01";
+  const pauseMark = /[\u06D6-\u06DC\u06DE\u06DF]/;
   return verses.flatMap(v => {
-    const split = v.ar.replace(/[\u06D6-\u06DC\u06DE\u06DF]/g, m => m + MARKER);
-    const parts = split.split(MARKER).map(p => p.trim()).filter(Boolean);
-    return (parts.length > 1 ? parts : [v.ar]).map(text => ({ text, ayah: v.n }));
+    const segments = [];
+    let part = [];
+    // Split only after a complete whitespace-delimited word bearing a waqf mark.
+    // This prevents a word from ever being cut in the middle.
+    for (const word of v.ar.trim().split(/\s+/)) {
+      part.push(word);
+      if (pauseMark.test(word)) {
+        segments.push({ text: part.join(" "), ayah: v.n });
+        part = [];
+      }
+    }
+    if (part.length) segments.push({ text: part.join(" "), ayah: v.n });
+    return segments;
   });
 }
 
@@ -260,11 +294,15 @@ async function loadLocalStudyData() {
     if (!state.surahList.length) {
       const corpus = await loadQuranCorpus();
       state.surahList = corpus.surahs.map(s => ({ id: s.id, name: s.names.transliteration }));
+      state.surahRukus = buildSurahRukus(corpus);
     }
 
     // Sync nav + hifz picker to active surah
     state.navSurahId = state.activeSurah.id;
     state.hifzPickerSurahId = state.activeSurah.id;
+    state.hifzPickerRuku = state.activeSurah.ruku;
+    state.arabicSurahId = state.activeSurah.id;
+    state.arabicInput = state.activeSurah.ruku;
 
     const sid = state.activeSurah.id;
     const [wordsResult, tafsirResult] = await Promise.allSettled([
@@ -297,16 +335,11 @@ async function loadLocalStudyData() {
     state.hifzLastAnswered = null;
 
     // Honour a picker-requested start position
-    if (state.hifzStartFromAyah) {
-      const idx = state.hifzSegments.findIndex(s => s.ayah === state.hifzStartFromAyah);
-      state.hifzIndex = Math.max(0, idx);
-      state.hifzStartFromAyah = null;
-    } else {
-      state.hifzIndex = 0;
-    }
+    state.hifzIndex = 0;
     state.hifzChoices = [];
 
     state.vocabQuestion = null;
+    state.vocabAyahIndex = 0;
     state.quizBank = [];
     newLessonQuiz();
     state.tafsirAyah = null;
@@ -414,29 +447,28 @@ function hifzView() {
   if (!state.hifzChoices.length && !state.hifzLastAnswered) makeHifzChoices();
   const current    = segs[state.hifzIndex] || segs[0];
   const currentAyah = state.hifzSegments[state.hifzIndex]?.ayah;
-  const completed  = state.hifzIndex >= segs.length - 1;
   const lastAns    = state.hifzLastAnswered;
   const pickerOpts = surahDropdownOptions(state.hifzPickerSurahId);
+  const rukuOpts   = rukuDropdownOptions(state.hifzPickerSurahId, state.hifzPickerRuku);
 
   app.innerHTML = `
     <div class="card" style="margin-bottom:16px;padding:15px">
-      <p class="section-label">START FROM SURAH &amp; AYAH</p>
+      <p class="section-label">START FROM SURAH &amp; RUKU</p>
       <form id="hifz-picker" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <select id="hifz-pick-surah" class="field" style="margin:0;flex:2;min-width:160px">${pickerOpts}</select>
-        <input type="number" id="hifz-pick-ayah" class="field" value="${state.hifzPickerAyah}"
-          min="1" placeholder="Ayah #" style="margin:0;width:80px" required>
+        <select id="hifz-pick-ruku" class="field" style="margin:0;flex:2;min-width:190px">${rukuOpts}</select>
         <button type="submit" class="button" style="padding:10px 15px">Go</button>
       </form>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="button secondary" data-action="prev-hifz-ruku" ${state.targetGlobalRuku <= 1 ? "disabled" : ""}>← Prev Ruku</button>
+        <button class="button secondary" data-action="next-hifz-ruku" ${state.targetGlobalRuku >= 556 ? "disabled" : ""}>Next Ruku →</button>
+      </div>
     </div>
 
     <section class="grid-2">
       <div class="card">
         <p class="section-label">CONTINUE THE RECITATION${currentAyah ? ` · AYAH ${currentAyah}` : ""}</p>
-        <h2>${completed ? "Ruku complete" : "What comes next?"}</h2>
-        ${completed ? `
-          <p>You have reached the end of this ruku sequence. Start over to strengthen memory.</p>
-          <button class="button" data-action="restart-hifz">Start again</button>
-        ` : `
+        <h2>What comes next?</h2>
           <div class="hifz-prompt">${current}</div>
           <p style="margin:10px 0 6px;font-size:0.85rem;opacity:0.7">Choose the next part:</p>
           <div id="hifz-options">
@@ -452,14 +484,13 @@ function hifzView() {
           ${lastAns && !lastAns.wasCorrect
             ? `<button class="button secondary" data-action="hifz-continue" style="margin-top:12px">Continue →</button>`
             : ""}
-        `}
       </div>
       <aside class="card">
         <p class="section-label">SESSION</p>
         <h3>Gentle recall, one step at a time.</h3>
         <p>A wrong answer reveals the correct continuation — you can always keep going. Only correct answers earn a point.</p>
         <div class="metric"><strong>${progress.hifz || 0}</strong><span>Hifz points earned</span></div>
-        <div class="metric"><strong>${Math.min(state.hifzIndex + 1, segs.length)} / ${segs.length}</strong><span>Position (incl. waqf parts)</span></div>
+        <div class="metric"><strong>${Math.min(state.hifzIndex + 1, segs.length)} / ${segs.length}</strong><span>Position in this ruku</span></div>
       </aside>
     </section>`;
 }
@@ -521,7 +552,7 @@ function lessonView() {
 
       <article class="card">
         <p class="section-label">RUKU QUIZ · AI-GENERATED</p>
-        ${current ? `
+        ${allAnswered ? quizEndContent() : current ? `
           <h3 style="font-size:1rem;margin-bottom:12px">${escape(current.q)}</h3>
           <div id="quiz-options">
             ${current.choices.map(choice => {
@@ -537,7 +568,6 @@ function lessonView() {
           </div>
           <div id="quiz-feedback">
             ${answered ? `<div class="feedback">${answered.isCorrect ? "Correct." : `Not quite — ${escape(normaliseChoice(current.a))}`}</div>` : ""}
-            ${allAnswered ? `<div class="feedback" style="margin-top:6px">Finished: ${state.quizScore} / ${state.lessonQuiz.length} correct.</div>` : ""}
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
             <button class="button secondary" data-action="quiz-prev"
@@ -549,22 +579,39 @@ function lessonView() {
         ` : `
           <p>${isGeminiConfigured()
             ? "Generate a five-question quiz from this local ruku."
-            : "Add your Gemini API key in src/geminiService.js to generate a quiz."}</p>
+            : "Please Add your Gemini API key in src/geminiService.js to generate a quiz."}</p>
         `}
-        <button class="text-button" data-action="refresh-quiz" ${state.quizLoading?"disabled":""}
+        ${!allAnswered ? `<button class="text-button" data-action="refresh-quiz" ${state.quizLoading?"disabled":""}
           style="margin-top:15px">${state.quizLoading?"Generating quiz…":"↻ Generate new quiz"}</button>
+        ` : ""}
       </article>
     </div>
     <section class="card" style="margin-top:18px">
       <p class="section-label">ASK AI · CHAT INTERACTIVE</p>
       <h2>Ask about this ruku</h2>
-      <p>The AI receives only the locally loaded verses and translations for this ruku.</p>
+      <p>The AI receives only the locally loaded tafsir for this ruku.</p>
       <form class="ask-form" id="ask-form">
         <input id="ask-input" maxlength="200" placeholder="e.g., Explain the core message of this ruku?" required>
         <button class="button">Ask AI</button>
       </form>
       <div id="ask-output"></div>
     </section>`;
+}
+
+function quizEndContent() {
+  const total = state.lessonQuiz.length;
+  const score = state.quizScore;
+  const remark = score === total ? "Excellent recall — you engaged closely with this tafsir." :
+    score >= Math.ceil(total * 0.7) ? "Good work. Revisit the tafsir notes for the questions you missed." :
+    "Keep studying the tafsir, then try a fresh quiz when you feel ready.";
+  return `
+    <p class="section-label">QUIZ COMPLETE</p>
+    <h2>${score} / ${total}</h2>
+    <div class="feedback"><strong>Remarks:</strong> ${remark}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+      <button class="button" data-action="new-quiz">New quiz</button>
+      <button class="button secondary" data-action="next-lesson-ruku" ${state.targetGlobalRuku >= 556 ? "disabled" : ""}>New ruku →</button>
+    </div>`;
 }
 
 // ── Arabic tab ────────────────────────────────────────────────────────────────
@@ -575,7 +622,7 @@ function arabicView() {
   app.innerHTML = `
     <div class="toolbar" style="margin-bottom:16px">
       <div class="tabs">
-        <button class="chip ${state.arabicMode==="browse"?"active":""}" data-action="arabic-mode" data-mode="browse">Browse Surah</button>
+        <button class="chip ${state.arabicMode==="ruku"?"active":""}" data-action="arabic-mode" data-mode="ruku">Ruku vocabulary</button>
         <button class="chip ${state.arabicMode==="letter"?"active":""}" data-action="arabic-mode" data-mode="letter">By Letter</button>
         <button class="chip ${state.arabicMode==="random"?"active":""}" data-action="arabic-mode" data-mode="random">Random 20</button>
       </div>
@@ -584,25 +631,20 @@ function arabicView() {
 }
 
 function arabicModeContent(opts) {
-  // ── Browse mode ──
-  if (state.arabicMode === "browse") {
+  // ── Ruku vocabulary mode ──
+  if (state.arabicMode === "ruku") {
+    const active = state.activeSurah;
+    const rukuOpts = rukuDropdownOptions(state.arabicSurahId, state.arabicInput);
     return `
       <div class="card" style="margin-bottom:16px;padding:15px">
-        <p class="section-label">BROWSE WORD-BY-WORD DATA</p>
-        <form id="arabic-browse-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-          <select id="arabic-browse-surah" class="field" style="margin:0;flex:2;min-width:160px">${opts}</select>
-          <div class="tabs">
-            <button type="button" class="chip ${state.arabicInputMode==="ruku"?"active":""}" data-action="arabic-browse-mode" data-mode="ruku">Ruku #</button>
-            <button type="button" class="chip ${state.arabicInputMode==="ayah"?"active":""}" data-action="arabic-browse-mode" data-mode="ayah">Ayah #</button>
-          </div>
-          <input type="number" id="arabic-browse-input" class="field" value="${state.arabicInput}" min="1"
-            placeholder="${state.arabicInputMode==="ruku"?"Ruku #":"Ayah #"}" style="margin:0;width:80px" required>
-          <button type="submit" class="button" style="padding:10px 16px" ${state.arabicBrowseLoading?"disabled":""}>
-            ${state.arabicBrowseLoading?"Loading…":"Load Words"}
-          </button>
+        <p class="section-label">START FROM SURAH &amp; RUKU</p>
+        <form id="arabic-ruku-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select id="arabic-ruku-surah" class="field" style="margin:0;flex:2;min-width:160px">${opts}</select>
+          <select id="arabic-ruku-select" class="field" style="margin:0;flex:2;min-width:190px">${rukuOpts}</select>
+          <button type="submit" class="button" style="padding:10px 16px">Go</button>
         </form>
       </div>
-      ${state.arabicBrowseWords.length ? wordGrid(state.arabicBrowseWords) : ""}`;
+      ${active ? rukuVocabularyContent(active) : ""}`;
   }
 
   // ── Letter mode ──
@@ -652,6 +694,48 @@ function arabicModeContent(opts) {
       ${state.arabicRandomWords.length ? wordGrid(state.arabicRandomWords) : ""}`;
   }
   return "";
+}
+
+function rukuVocabularyContent(active) {
+  const ayahsWithWords = active.verses.filter(v => v.words.length);
+  if (!ayahsWithWords.length) return `<section class="card"><h2>No vocabulary loaded for this ruku</h2><p>The word-by-word dataset has no entries for this selection.</p></section>`;
+  state.vocabAyahIndex = Math.min(state.vocabAyahIndex, ayahsWithWords.length - 1);
+  const ayah = ayahsWithWords[state.vocabAyahIndex];
+  if (!state.vocabQuestion || state.vocabQuestion.ayah !== ayah.n) {
+    const [ar, meaning] = ayah.words[Math.floor(Math.random() * ayah.words.length)];
+    const allMeanings = active.verses.flatMap(v => v.words.map(w => w[1])).filter(Boolean);
+    state.vocabQuestion = {
+      ayah: ayah.n,
+      word: { ar, meaning },
+      choices: shuffle([meaning, ...shuffle(allMeanings.filter(m => m !== meaning)).slice(0, 3)])
+    };
+  }
+  const q = state.vocabQuestion;
+  const firstAyah = active.verses[0].n;
+  const lastAyah = active.verses.at(-1).n;
+  return `
+    <section class="grid-2">
+      <article class="card">
+        <p class="section-label">RUKU ${active.ruku}: VERSES ${firstAyah} TO ${lastAyah}</p>
+        <h2>Words in this ruku</h2>
+        <div>${active.verses.map(v => `
+          <div class="vocab-card">
+            <div class="vocab-ar">${v.n}</div>
+            <div class="word-list" style="margin:0;padding:0;border:0">${v.words.map(w => `<span class="word"><b>${w[0]}</b> ${escape(w[1])}</span>`).join("")}</div>
+          </div>`).join("")}</div>
+      </article>
+      <article class="card">
+        <p class="section-label">QUICK CHECK · AYAH ${ayah.n}</p>
+        <h2>What does <span class="vocab-ar">${q.word.ar}</span> mean?</h2>
+        ${q.choices.map(c => `<button class="quiz-option" data-action="vocab-answer" data-choice="${escape(c)}">${escape(c)}</button>`).join("")}
+        <div id="vocab-feedback"></div>
+        <p class="source" style="margin-top:18px">A correct answer moves automatically to the next ayah.</p>
+      </article>
+    </section>
+    <div style="display:flex;gap:10px;margin-top:16px;padding:0 4px">
+      <button class="button secondary" data-action="prev-vocab-ruku" ${state.targetGlobalRuku <= 1 ? "disabled" : ""}>← Prev Ruku</button>
+      <button class="button secondary" data-action="next-vocab-ruku" ${state.targetGlobalRuku >= 556 ? "disabled" : ""}>Next Ruku →</button>
+    </div>`;
 }
 
 function wordGrid(words) {
@@ -894,8 +978,13 @@ document.addEventListener("click", event => {
       selectView("hifz");
     }
     if (action === "restart-hifz")        { state.hifzIndex = 0; state.hifzChoices = []; state.hifzLastAnswered = null; render(); }
+    if (action === "prev-hifz-ruku")     { if (state.targetGlobalRuku > 1) { state.targetGlobalRuku--; loadLocalStudyData(); } }
+    if (action === "next-hifz-ruku")     { if (state.targetGlobalRuku < 556) { state.targetGlobalRuku++; loadLocalStudyData(); } }
     if (action === "hifz-answer")         answerHifz(btn);
-    if (action === "hifz-continue")       { state.hifzIndex++; state.hifzChoices = []; state.hifzLastAnswered = null; render(); }
+    if (action === "hifz-continue") {
+      if (state.hifzIndex + 1 >= state.hifzSegments.length - 1) advanceHifzRuku();
+      else { state.hifzIndex++; state.hifzChoices = []; state.hifzLastAnswered = null; render(); }
+    }
 
     // Lesson / quiz
     if (action === "to-lesson")           selectView("lesson");
@@ -903,11 +992,15 @@ document.addEventListener("click", event => {
     if (action === "quiz-prev")           { state.quizIndex = Math.max(0, state.quizIndex - 1); render(); }
     if (action === "quiz-next")           { state.quizIndex = Math.min(state.lessonQuiz.length - 1, state.quizIndex + 1); render(); }
     if (action === "refresh-quiz")        generateQuiz();
+    if (action === "new-quiz")            { newLessonQuiz(); render(); }
+    if (action === "next-lesson-ruku")    { if (state.targetGlobalRuku < 556) { state.targetGlobalRuku++; loadLocalStudyData(); } }
     if (action === "generate-summary")    generateSummary();
 
     // Vocabulary
     if (action === "vocab-answer")        answerVocab(btn);
     if (action === "next-vocab")          { state.vocabQuestion = null; render(); }
+    if (action === "prev-vocab-ruku")     { if (state.targetGlobalRuku > 1) { state.targetGlobalRuku--; loadLocalStudyData(); } }
+    if (action === "next-vocab-ruku")     { if (state.targetGlobalRuku < 556) { state.targetGlobalRuku++; loadLocalStudyData(); } }
 
     // Arabic tab
     if (action === "arabic-mode") {
@@ -939,6 +1032,16 @@ document.addEventListener("change", event => {
   if (event.target.id === "language")            { state.language = event.target.value === "ur" ? "ur" : "en"; render(); }
   if (event.target.id === "nav-surah")           { state.navSurahId = Number(event.target.value); }
   if (event.target.id === "arabic-browse-surah") { state.arabicSurahId = Number(event.target.value); }
+  if (event.target.id === "arabic-ruku-surah") {
+    state.arabicSurahId = Number(event.target.value);
+    state.arabicInput = state.surahRukus[state.arabicSurahId]?.[0]?.number || 1;
+    render();
+  }
+  if (event.target.id === "hifz-pick-surah") {
+    state.hifzPickerSurahId = Number(event.target.value);
+    state.hifzPickerRuku = state.surahRukus[state.hifzPickerSurahId]?.[0]?.number || 1;
+    render();
+  }
 });
 
 document.addEventListener("submit", event => {
@@ -957,18 +1060,26 @@ document.addEventListener("submit", event => {
     }
     if (event.target.id === "hifz-picker") {
       const sid    = Number($("#hifz-pick-surah").value);
-      const ayahN  = Number($("#hifz-pick-ayah").value);
+      const rukuN  = Number($("#hifz-pick-ruku").value);
       state.hifzPickerSurahId = sid;
-      state.hifzPickerAyah    = ayahN;
-      state.hifzStartFromAyah = ayahN;
-      findGlobalRukuForAyah(sid, ayahN)
+      state.hifzPickerRuku = rukuN;
+      resolveGlobalRuku(sid, "ruku", rukuN)
         .then(g => { state.targetGlobalRuku = g; return loadLocalStudyData(); })
-        .catch(e => { state.hifzStartFromAyah = null; toast(e.message || "Could not load that ayah."); });
+        .catch(e => toast(e.message || "Could not load that ruku."));
     }
     if (event.target.id === "arabic-browse-form") {
       state.arabicSurahId = Number($("#arabic-browse-surah").value);
       state.arabicInput   = Number($("#arabic-browse-input").value);
       loadArabicBrowseWords();
+    }
+    if (event.target.id === "arabic-ruku-form") {
+      const sid = Number($("#arabic-ruku-surah").value);
+      const rukuN = Number($("#arabic-ruku-select").value);
+      state.arabicSurahId = sid;
+      state.arabicInput = rukuN;
+      resolveGlobalRuku(sid, "ruku", rukuN)
+        .then(g => { state.targetGlobalRuku = g; return loadLocalStudyData(); })
+        .catch(e => toast(e.message || "Could not load that ruku."));
     }
   } catch (error) {
     console.error(error);
@@ -980,7 +1091,8 @@ document.addEventListener("submit", event => {
 
 function answerHifz(btn) {
   const segs     = hifzSegs();
-  const expected = segs[Math.min(state.hifzIndex + 1, segs.length - 1)];
+  const nextIndex = Math.min(state.hifzIndex + 1, segs.length - 1);
+  const expected = segs[nextIndex];
   const correct  = btn.dataset.choice === expected;
   state.hifzLastAnswered = { chosen: btn.dataset.choice, correct: expected, wasCorrect: correct };
   if (correct) {
@@ -989,10 +1101,26 @@ function answerHifz(btn) {
     progress.todayActivity.hifzPts++;
     persist();
     render();
-    setTimeout(() => { state.hifzIndex++; state.hifzChoices = []; state.hifzLastAnswered = null; render(); }, 700);
+    setTimeout(() => {
+      if (nextIndex >= segs.length - 1) advanceHifzRuku();
+      else { state.hifzIndex++; state.hifzChoices = []; state.hifzLastAnswered = null; render(); }
+    }, 700);
   } else {
     render(); // show highlighted correct + Continue button
   }
+}
+
+function advanceHifzRuku() {
+  if (state.targetGlobalRuku >= 556) {
+    state.hifzIndex = 0;
+    state.hifzChoices = [];
+    state.hifzLastAnswered = null;
+    toast("You have reached the end of the Quran. Starting this ruku again.");
+    render();
+    return;
+  }
+  state.targetGlobalRuku++;
+  loadLocalStudyData();
 }
 
 function answerQuiz(btn) {
@@ -1009,7 +1137,15 @@ function answerVocab(btn) {
   const correct = btn.dataset.choice === state.vocabQuestion.word.meaning;
   document.querySelectorAll(".quiz-option").forEach(x => x.disabled = true);
   btn.classList.add(correct ? "correct" : "wrong");
-  $("#vocab-feedback").innerHTML = `<div class="feedback">${correct ? "Correct — well remembered." : `The answer is: ${state.vocabQuestion.word.meaning}.`}</div>`;
+  $("#vocab-feedback").innerHTML = `<div class="feedback">${correct ? "Correct — moving to the next ayah…" : `The answer is: ${state.vocabQuestion.word.meaning}.`}</div>`;
+  if (correct) {
+    const ayahsWithWords = state.activeSurah.verses.filter(v => v.words.length);
+    setTimeout(() => {
+      state.vocabAyahIndex = (state.vocabAyahIndex + 1) % ayahsWithWords.length;
+      state.vocabQuestion = null;
+      render();
+    }, 700);
+  }
 }
 
 // ── AI helpers ────────────────────────────────────────────────────────────────
@@ -1033,7 +1169,7 @@ async function generateSummary() {
 }
 
 async function generateQuiz() {
-  if (!isGeminiConfigured()) return toast("Paste your Gemini API key in src/geminiService.js to use AI quizzes.");
+  if (!isGeminiConfigured()) return toast("Please paste your Gemini API key in src/geminiService.js to use AI quizzes.");
   state.quizLoading = true; render();
   try {
     const quiz = await generateDynamicQuiz(createStudyContext(state.activeSurah));

@@ -23,7 +23,7 @@ async function generateJson(prompt) {
 
 export async function generateStudySummary(context) {
   return generateJson(`
-You are a careful Quran study assistant. Produce a concise study background and summary using only this supplied local corpus excerpt. Do not add uncited historical claims, legal rulings, or sectarian conclusions.
+You are a careful Quran study assistant. Produce a concise study background and summary using only the supplied local tafsir excerpts. Do not use translations as context and do not add uncited historical claims, legal rulings, or sectarian conclusions.
 
 ${JSON.stringify(context)}
 
@@ -40,7 +40,7 @@ ${JSON.stringify(context)}`);
 
 export async function generateDynamicQuiz(context) {
   return generateJson(`
-Write exactly five thoughtful multiple-choice questions based only on this local Quran corpus excerpt. Each question needs four choices, exactly one answer matching a choice verbatim, and no unsupported claims.
+Write exactly five thoughtful multiple-choice questions based only on these supplied local tafsir excerpts. Do not use translations as context. Each question needs four choices, exactly one answer matching a choice verbatim, and no unsupported claims.
 
 ${JSON.stringify(context)}
 

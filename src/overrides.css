@@ -1,0 +1,13 @@
+.word-list {
+  direction: rtl;
+  justify-content: flex-start;
+}
+
+.word {
+  direction: rtl;
+}
+
+.word b {
+  margin-right: 0;
+  margin-left: 4px;
+}
