@@ -156,7 +156,25 @@ function rukuDropdownOptions(surahId, selectedRuku) {
 function initTodayActivity() {
   const t = today();
   if (!progress.todayActivity || progress.todayActivity.date !== t) {
-    progress.todayActivity = { date: t, hifzPts: 0, lessonVisited: false, arabicWords: 0 };
+    progress.todayActivity = { date: t, hifzPts: 0, lessonVisited: false, arabicWords: 0, readAyahs: [] };
+    persist();
+  } else if (!progress.todayActivity.readAyahs) {
+    progress.todayActivity.readAyahs = [];
+    persist();
+  }
+}
+
+function markAyahsAsRead(surahId, ayahNums) {
+  initTodayActivity();
+  let changed = false;
+  ayahNums.forEach(n => {
+    const key = `${surahId}:${n}`;
+    if (!progress.todayActivity.readAyahs.includes(key)) {
+      progress.todayActivity.readAyahs.push(key);
+      changed = true;
+    }
+  });
+  if (changed) {
     persist();
   }
 }
@@ -384,6 +402,7 @@ async function loadLocalStudyData() {
 
 function readingView() {
   if (!state.activeSurah) return;
+  markAyahsAsRead(state.activeSurah.id, state.activeSurah.verses.map(v => v.n));
   setHeading("Read with presence", `QURAN · ${state.activeSurah.name.toUpperCase()} · RUKU ${state.activeSurah.rukuInQuran}`);
   const opts = surahDropdownOptions(state.navSurahId);
 
@@ -1048,6 +1067,7 @@ function progressView() {
     <section class="card" style="margin-top:16px">
       <p class="section-label">TODAY'S ACTIVITY · AUTO-TRACKED</p>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:12px">
+        <div class="metric"><strong>${act.readAyahs ? act.readAyahs.length : 0}</strong><span>Ayahs read today</span></div>
         <div class="metric"><strong>${act.hifzPts}</strong><span>Hifz pts today</span></div>
         <div class="metric"><strong>${act.lessonVisited ? "✓" : "—"}</strong><span>Lesson visited</span></div>
         <div class="metric"><strong>${act.arabicWords}</strong><span>Arabic words seen</span></div>
@@ -1076,8 +1096,9 @@ function checkinForm(prefill = {}) {
         </select>
       </div>
       <div class="field">
-        <label for="ayahs">Ayahs read today</label>
-        <input id="ayahs" name="ayahs" type="number" min="0" max="1000" value="${prefill.ayahs||0}" required>
+        <label>Ayahs read today <span class="pill">auto-tracked</span></label>
+        <input id="ayahs" name="ayahs" type="number" value="${prefill.ayahs ?? (act.readAyahs ? act.readAyahs.length : 0)}" readonly
+          style="opacity:0.65;cursor:default">
       </div>
       <div class="field">
         <label>Hifz today <span class="pill">auto-tracked</span></label>
