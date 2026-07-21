@@ -429,6 +429,19 @@ function readingView() {
   $("#language").value = state.language;
 }
 
+function tafsirFor(n) {
+  const text = state.activeSurah.tafsir?.[String(n)]?.tafsir;
+  return `
+    <div class="tafsir">
+      <h4>Tafsir <span class="pill">Ayah ${n}</span></h4>
+      ${text
+        ? `<p style="font-size:0.88rem;line-height:1.7;max-height:300px;overflow-y:auto">${escape(text)}</p>
+           <p class="source">Local tafsir dataset · not a substitute for primary scholarly sources.</p>`
+        : `<p>${state.activeSurah.tafsir ? "No tafsir entry found for this ayah." : "Tafsir could not be loaded for this surah."}</p>`}
+      <button class="text-button" data-action="to-lesson">Open full lesson →</button>
+    </div>`;
+}
+
 // ── Hifz ─────────────────────────────────────────────────────────────────────
 
 function makeHifzChoices() {
