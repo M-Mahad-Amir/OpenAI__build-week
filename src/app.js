@@ -47,11 +47,11 @@ let state = {
 
   // Feature 1 — Reading nav
   navSurahId: 1,
-  navMode: "ruku",        // "ruku" | "ayah"
+  navMode: "ayah",        // "ruku" | "ayah"
   navInput: 1,
 
   // Feature 2 — Arabic tab
-  arabicMode: "ruku",     // "ruku" | "letter" | "random"
+  arabicMode: "ruku",     // "ruku" | "surah" | "letter" | "ruku-quiz"
   arabicSurahId: 1,
   arabicInputMode: "ruku",// "ruku" | "ayah" within browse
   arabicInput: 1,
@@ -79,7 +79,12 @@ let state = {
   quizBank: [],
 
   // Feature 5 — Journey
-  editingEntry: null      // populated when user clicks "Edit today"
+  editingEntry: null,      // populated when user clicks "Edit today"
+
+  // Feature 6 — Vocab quiz
+  vocabQuizIndex: 0,
+  vocabQuizChoices: [],
+  vocabQuizLastAnswered: null
 };
 
 // ── Pure helpers ─────────────────────────────────────────────────────────────
@@ -312,6 +317,7 @@ async function loadLocalStudyData() {
 
     if (wordsResult.status === "fulfilled") {
       const words = wordsResult.value;
+      state.activeSurah.words = words;
       state.activeSurah.verses.forEach(v => {
         v.words = (words[String(v.n)] || []).map(w => [w.arabic, w.translation]);
       });
@@ -343,6 +349,9 @@ async function loadLocalStudyData() {
     state.quizBank = [];
     newLessonQuiz();
     state.tafsirAyah = null;
+    state.vocabQuizIndex = 0;
+    state.vocabQuizChoices = [];
+    state.vocabQuizLastAnswered = null;
 
     initTodayActivity();
   } catch (error) {
@@ -514,18 +523,38 @@ function lessonView() {
         <p class="section-label">LOCAL TAFSIR · AYAH BY AYAH</p>
         <h2>${state.activeSurah.name} · Ayahs ${firstAyah}–${lastAyah}</h2>
 
-        ${state.activeSurah.verses.map(v => {
-          const text = tafsirData?.[String(v.n)]?.tafsir;
-          return `
-            <div style="margin-bottom:20px;border-top:1px solid var(--line);padding-top:14px">
-              <p class="section-label">AYAH ${v.n}</p>
-              <div class="ayah-ar" style="font-size:1.2rem;margin-bottom:6px">${v.ar}</div>
-              <p class="translation" style="margin-bottom:10px">${escape(v.en)}</p>
-              ${text
-                ? `<p style="font-size:0.87rem;line-height:1.75">${escape(text)}</p>`
-                : `<p class="source">${tafsirData ? "No tafsir entry for this ayah." : "Tafsir could not be loaded."}</p>`}
-            </div>`;
-        }).join("")}
+        ${(() => {
+          const groups = [];
+          state.activeSurah.verses.forEach(v => {
+            const text = tafsirData?.[String(v.n)]?.tafsir || "";
+            const lastGroup = groups[groups.length - 1];
+            if (lastGroup && lastGroup.tafsir === text) {
+              lastGroup.verses.push(v);
+            } else {
+              groups.push({
+                tafsir: text,
+                verses: [v]
+              });
+            }
+          });
+
+          return groups.map(g => {
+            const first = g.verses[0].n;
+            const last = g.verses[g.verses.length - 1].n;
+            const label = first === last ? `AYAH ${first}` : `AYAH ${first}-${last}`;
+            return `
+              <div style="margin-bottom:20px;border-top:1px solid var(--line);padding-top:14px">
+                <p class="section-label">${label}</p>
+                ${g.verses.map(v => `
+                  <div class="ayah-ar" style="font-size:1.2rem;margin-bottom:6px">${v.ar}</div>
+                  <p class="translation" style="margin-bottom:10px">${escape(v.en)}</p>
+                `).join("")}
+                ${g.tafsir
+                  ? `<p style="font-size:0.87rem;line-height:1.75">${escape(g.tafsir)}</p>`
+                  : `<p class="source">${tafsirData ? "No tafsir entry for this ayah." : "Tafsir could not be loaded."}</p>`}
+              </div>`;
+          }).join("");
+        })()}
 
         ${state.activeSurah.lesson.summary ? `
           <div style="border-top:1px solid var(--line);margin-top:20px;padding-top:16px">
@@ -611,9 +640,10 @@ function arabicView() {
   app.innerHTML = `
     <div class="toolbar" style="margin-bottom:16px">
       <div class="tabs">
-        <button class="chip ${state.arabicMode==="ruku"?"active":""}" data-action="arabic-mode" data-mode="ruku">Ruku vocabulary</button>
+        <button class="chip ${state.arabicMode==="ruku"?"active":""}" data-action="arabic-mode" data-mode="ruku">Ruku Vocabulary</button>
+        <button class="chip ${state.arabicMode==="surah"?"active":""}" data-action="arabic-mode" data-mode="surah">Surah Vocabulary</button>
         <button class="chip ${state.arabicMode==="letter"?"active":""}" data-action="arabic-mode" data-mode="letter">By Letter</button>
-        <button class="chip ${state.arabicMode==="random"?"active":""}" data-action="arabic-mode" data-mode="random">Random 20</button>
+        <button class="chip ${state.arabicMode==="ruku-quiz"?"active":""}" data-action="arabic-mode" data-mode="ruku-quiz">Ruku Vocabulary Quiz</button>
       </div>
     </div>
     ${arabicModeContent(opts)}`;
@@ -623,17 +653,13 @@ function arabicModeContent(opts) {
   // ── Ruku vocabulary mode ──
   if (state.arabicMode === "ruku") {
     const active = state.activeSurah;
-    const rukuOpts = rukuDropdownOptions(state.arabicSurahId, state.arabicInput);
-    return `
-      <div class="card" style="margin-bottom:16px;padding:15px">
-        <p class="section-label">START FROM SURAH &amp; RUKU</p>
-        <form id="arabic-ruku-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-          <select id="arabic-ruku-surah" class="field" style="margin:0;flex:2;min-width:160px">${opts}</select>
-          <select id="arabic-ruku-select" class="field" style="margin:0;flex:2;min-width:190px">${rukuOpts}</select>
-          <button type="submit" class="button" style="padding:10px 16px">Go</button>
-        </form>
-      </div>
-      ${active ? rukuVocabularyContent(active) : ""}`;
+    return active ? rukuVocabularyContent(active) : "";
+  }
+
+  // ── Surah vocabulary mode ──
+  if (state.arabicMode === "surah") {
+    const active = state.activeSurah;
+    return active ? surahVocabularyContent(active, opts) : "";
   }
 
   // ── Letter mode ──
@@ -662,69 +688,202 @@ function arabicModeContent(opts) {
           : ""}`;
   }
 
-  // ── Random mode ──
-  if (state.arabicMode === "random") {
-    if (state.arabicIndexLoading)
-      return `<div class="card"><p>Loading full-Quran word index…</p></div>`;
-    const remaining = state.arabicWordIndex
-      ? state.arabicWordIndex.length - state.arabicSessionSeen.size
-      : null;
-    return `
-      <div class="card" style="margin-bottom:16px;padding:15px">
-        <p class="section-label">RANDOM VOCABULARY DRILL · FULL QURAN</p>
-        <p>20 unique words sampled from the full Quran. Already-seen words are skipped for this session.</p>
-        ${remaining !== null
-          ? `<p class="source">${remaining} words remaining in pool this session.</p>`
-          : `<p class="source">Word index not yet loaded — click the button to fetch it once (~1 MB).</p>`}
-        <button class="button" data-action="arabic-random" style="margin-top:12px">
-          ${state.arabicRandomWords.length ? "Get Next 20 →" : "Get 20 Random Words"}
-        </button>
-      </div>
-      ${state.arabicRandomWords.length ? wordGrid(state.arabicRandomWords) : ""}`;
+  // ── Ruku Vocabulary Quiz mode ──
+  if (state.arabicMode === "ruku-quiz") {
+    const active = state.activeSurah;
+    return active ? rukuVocabularyQuizContent(active) : "";
   }
   return "";
 }
 
 function rukuVocabularyContent(active) {
   const ayahsWithWords = active.verses.filter(v => v.words.length);
-  if (!ayahsWithWords.length) return `<section class="card"><h2>No vocabulary loaded for this ruku</h2><p>The word-by-word dataset has no entries for this selection.</p></section>`;
-  state.vocabAyahIndex = Math.min(state.vocabAyahIndex, ayahsWithWords.length - 1);
-  const ayah = ayahsWithWords[state.vocabAyahIndex];
-  if (!state.vocabQuestion || state.vocabQuestion.ayah !== ayah.n) {
-    const [ar, meaning] = ayah.words[Math.floor(Math.random() * ayah.words.length)];
-    const allMeanings = active.verses.flatMap(v => v.words.map(w => w[1])).filter(Boolean);
-    state.vocabQuestion = {
-      ayah: ayah.n,
-      word: { ar, meaning },
-      choices: shuffle([meaning, ...shuffle(allMeanings.filter(m => m !== meaning)).slice(0, 3)])
-    };
+  const rukuOpts = rukuDropdownOptions(state.arabicSurahId, state.arabicInput);
+  if (!ayahsWithWords.length) {
+    return `
+      <div class="card" style="margin-bottom:16px;padding:15px">
+        <p class="section-label">START FROM SURAH &amp; RUKU</p>
+        <form id="arabic-ruku-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select id="arabic-ruku-surah" class="field" style="margin:0;flex:2;min-width:160px">${surahDropdownOptions(state.arabicSurahId)}</select>
+          <select id="arabic-ruku-select" class="field" style="margin:0;flex:2;min-width:190px">${rukuOpts}</select>
+          <button type="submit" class="button" style="padding:10px 16px">Go</button>
+        </form>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="button secondary" data-action="prev-arabic-ruku" ${state.targetGlobalRuku <= 1 ? "disabled" : ""}>← Prev Ruku</button>
+          <button class="button secondary" data-action="next-arabic-ruku" ${state.targetGlobalRuku >= 556 ? "disabled" : ""}>Next Ruku →</button>
+        </div>
+      </div>
+      <section class="card">
+        <h2>No vocabulary loaded for this ruku</h2>
+        <p>The word-by-word dataset has no entries for this selection.</p>
+      </section>`;
   }
-  const q = state.vocabQuestion;
   const firstAyah = active.verses[0].n;
   const lastAyah = active.verses.at(-1).n;
   return `
-    <section class="grid-2">
-      <article class="card">
-        <p class="section-label">RUKU ${active.ruku}: VERSES ${firstAyah} TO ${lastAyah}</p>
-        <h2>Words in this ruku</h2>
-        <div>${active.verses.map(v => `
+    <div class="card" style="margin-bottom:16px;padding:15px">
+      <p class="section-label">START FROM SURAH &amp; RUKU</p>
+      <form id="arabic-ruku-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <select id="arabic-ruku-surah" class="field" style="margin:0;flex:2;min-width:160px">${surahDropdownOptions(state.arabicSurahId)}</select>
+        <select id="arabic-ruku-select" class="field" style="margin:0;flex:2;min-width:190px">${rukuOpts}</select>
+        <button type="submit" class="button" style="padding:10px 16px">Go</button>
+      </form>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="button secondary" data-action="prev-arabic-ruku" ${state.targetGlobalRuku <= 1 ? "disabled" : ""}>← Prev Ruku</button>
+        <button class="button secondary" data-action="next-arabic-ruku" ${state.targetGlobalRuku >= 556 ? "disabled" : ""}>Next Ruku →</button>
+      </div>
+    </div>
+    
+    <article class="card">
+      <p class="section-label">RUKU ${active.ruku}: VERSES ${firstAyah} TO ${lastAyah}</p>
+      <h2>Words in this ruku</h2>
+      <div>${active.verses.map(v => `
+        <div class="vocab-card">
+          <div class="vocab-ar">${v.n}</div>
+          <div class="word-list" style="margin:0;padding:0;border:0">${v.words.map(w => `<span class="word"><b>${w[0]}</b> ${escape(w[1])}</span>`).join("")}</div>
+        </div>`).join("")}</div>
+    </article>`;
+}
+
+function surahVocabularyContent(active, opts) {
+  return `
+    <div class="card" style="margin-bottom:16px;padding:15px">
+      <p class="section-label">START FROM SURAH</p>
+      <form id="arabic-surah-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <select id="arabic-surah-select" class="field" style="margin:0;flex:2;min-width:160px">${opts}</select>
+        <button type="submit" class="button" style="padding:10px 16px">Go</button>
+      </form>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="button secondary" data-action="prev-arabic-surah" ${state.arabicSurahId <= 1 ? "disabled" : ""}>← Prev Surah</button>
+        <button class="button secondary" data-action="next-arabic-surah" ${state.arabicSurahId >= 114 ? "disabled" : ""}>Next Surah →</button>
+      </div>
+    </div>
+
+    <article class="card" style="overflow-y:auto;max-height:75vh">
+      <p class="section-label">${active.name.toUpperCase()} · ALL VOCABULARY</p>
+      <h2>Words in this surah</h2>
+      <div>
+        ${active.words && Object.keys(active.words).length ? Object.entries(active.words).map(([ayahNum, wordsList]) => `
           <div class="vocab-card">
-            <div class="vocab-ar">${v.n}</div>
-            <div class="word-list" style="margin:0;padding:0;border:0">${v.words.map(w => `<span class="word"><b>${w[0]}</b> ${escape(w[1])}</span>`).join("")}</div>
-          </div>`).join("")}</div>
-      </article>
-      <article class="card">
-        <p class="section-label">QUICK CHECK · AYAH ${ayah.n}</p>
-        <h2>What does <span class="vocab-ar">${q.word.ar}</span> mean?</h2>
-        ${q.choices.map(c => `<button class="quiz-option" data-action="vocab-answer" data-choice="${escape(c)}">${escape(c)}</button>`).join("")}
-        <div id="vocab-feedback"></div>
-        <p class="source" style="margin-top:18px">A correct answer moves automatically to the next ayah.</p>
-      </article>
-    </section>
-    <div style="display:flex;gap:10px;margin-top:16px;padding:0 4px">
-      <button class="button secondary" data-action="prev-vocab-ruku" ${state.targetGlobalRuku <= 1 ? "disabled" : ""}>← Prev Ruku</button>
-      <button class="button secondary" data-action="next-vocab-ruku" ${state.targetGlobalRuku >= 556 ? "disabled" : ""}>Next Ruku →</button>
-    </div>`;
+            <div class="vocab-ar">${ayahNum}</div>
+            <div class="word-list" style="margin:0;padding:0;border:0">
+              ${wordsList.map(w => `<span class="word"><b>${w.arabic}</b> ${escape(w.translation)}</span>`).join("")}
+            </div>
+          </div>
+        `).join("") : `<p>No vocabulary loaded for this surah.</p>`}
+      </div>
+    </article>`;
+}
+
+function makeVocabQuizChoices() {
+  const active = state.activeSurah;
+  if (!active) return;
+  const rukuWords = active.verses.flatMap(v => v.words.map(w => ({ ar: w[0], meaning: w[1], ayah: v.n })));
+  if (!rukuWords.length) return;
+  
+  const current = rukuWords[state.vocabQuizIndex];
+  if (!current) return;
+  
+  const correct = current.meaning;
+  const otherMeanings = rukuWords.map(w => w.meaning).filter(m => m && m !== correct);
+  const uniqueOthers = [...new Set(otherMeanings)];
+  
+  let incorrect = shuffle(uniqueOthers).slice(0, 3);
+  
+  if (incorrect.length < 3 && state.vocabBank) {
+    const globalOthers = state.vocabBank.map(w => w.meaning).filter(m => m && m !== correct && !incorrect.includes(m));
+    incorrect = [...incorrect, ...shuffle(globalOthers).slice(0, 3 - incorrect.length)];
+  }
+  
+  const fallbacks = ["Indeed", "Verily", "Mercy", "Praise", "Guidance", "Righteous"];
+  let fallbackIdx = 0;
+  while (incorrect.length < 3) {
+    const f = fallbacks[fallbackIdx % fallbacks.length];
+    if (f !== correct && !incorrect.includes(f)) {
+      incorrect.push(f);
+    }
+    fallbackIdx++;
+  }
+  
+  state.vocabQuizChoices = shuffle([correct, ...incorrect]);
+}
+
+function rukuVocabularyQuizContent(active) {
+  const rukuWords = active.verses.flatMap(v => v.words.map(w => ({ ar: w[0], meaning: w[1], ayah: v.n })));
+  const rukuOpts = rukuDropdownOptions(state.arabicSurahId, state.arabicInput);
+  
+  if (!rukuWords.length) {
+    return `
+      <div class="card" style="margin-bottom:16px;padding:15px">
+        <p class="section-label">START FROM SURAH &amp; RUKU</p>
+        <form id="arabic-ruku-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <select id="arabic-ruku-surah" class="field" style="margin:0;flex:2;min-width:160px">${surahDropdownOptions(state.arabicSurahId)}</select>
+          <select id="arabic-ruku-select" class="field" style="margin:0;flex:2;min-width:190px">${rukuOpts}</select>
+          <button type="submit" class="button" style="padding:10px 16px">Go</button>
+        </form>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="button secondary" data-action="prev-arabic-ruku" ${state.targetGlobalRuku <= 1 ? "disabled" : ""}>← Prev Ruku</button>
+          <button class="button secondary" data-action="next-arabic-ruku" ${state.targetGlobalRuku >= 556 ? "disabled" : ""}>Next Ruku →</button>
+        </div>
+      </div>
+      <section class="card">
+        <h2>No vocabulary loaded for this ruku</h2>
+        <p>The word-by-word dataset has no entries for this selection.</p>
+      </section>`;
+  }
+  
+  if (state.vocabQuizIndex >= rukuWords.length) {
+    state.vocabQuizIndex = 0;
+  }
+  
+  if (!state.vocabQuizChoices.length && !state.vocabQuizLastAnswered) {
+    makeVocabQuizChoices();
+  }
+  
+  const current = rukuWords[state.vocabQuizIndex];
+  const lastAns = state.vocabQuizLastAnswered;
+  
+  return `
+    <div class="card" style="margin-bottom:16px;padding:15px">
+      <p class="section-label">START FROM SURAH &amp; RUKU</p>
+      <form id="arabic-ruku-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <select id="arabic-ruku-surah" class="field" style="margin:0;flex:2;min-width:160px">${surahDropdownOptions(state.arabicSurahId)}</select>
+        <select id="arabic-ruku-select" class="field" style="margin:0;flex:2;min-width:190px">${rukuOpts}</select>
+        <button type="submit" class="button" style="padding:10px 16px">Go</button>
+      </form>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="button secondary" data-action="prev-arabic-ruku" ${state.targetGlobalRuku <= 1 ? "disabled" : ""}>← Prev Ruku</button>
+        <button class="button secondary" data-action="next-arabic-ruku" ${state.targetGlobalRuku >= 556 ? "disabled" : ""}>Next Ruku →</button>
+      </div>
+    </div>
+
+    <section class="grid-2">
+      <div class="card">
+        <p class="section-label">QUICK CHECK · AYAH ${current.ayah}</p>
+        <h2>What does <span class="vocab-ar">${current.ar}</span> mean?</h2>
+        <p style="margin:10px 0 6px;font-size:0.85rem;opacity:0.7">Choose the correct meaning:</p>
+        <div id="vocab-quiz-options">
+          ${state.vocabQuizChoices.map(choice => {
+            let cls = "quiz-option";
+            if (lastAns) {
+              if (choice === lastAns.correct) cls += " correct";
+              else if (choice === lastAns.chosen && !lastAns.wasCorrect) cls += " wrong";
+            }
+            return `<button class="${cls}" data-action="vocab-quiz-answer" data-choice="${escape(choice)}" ${lastAns ? "disabled" : ""}>${escape(choice)}</button>`;
+          }).join("")}
+        </div>
+        ${lastAns && !lastAns.wasCorrect
+          ? `<button class="button secondary" data-action="vocab-quiz-continue" style="margin-top:12px">Continue →</button>`
+          : ""}
+      </div>
+      <aside class="card">
+        <p class="section-label">SESSION</p>
+        <h3>Gentle recall, one step at a time.</h3>
+        <p>A wrong answer reveals the correct meaning — you can always keep going. Only correct answers earn a point.</p>
+        <div class="metric"><strong>${progress.vocabPoints || 0}</strong><span>Vocabulary points earned</span></div>
+        <div class="metric"><strong>${Math.min(state.vocabQuizIndex + 1, rukuWords.length)} / ${rukuWords.length}</strong><span>Position in this ruku</span></div>
+      </aside>
+    </section>`;
 }
 
 function wordGrid(words) {
@@ -1003,9 +1162,9 @@ document.addEventListener("click", event => {
     // Vocabulary
     if (action === "vocab-answer")        answerVocab(btn);
     if (action === "toggle-vocab-chart") {
-  state.hideVocabChart = !state.hideVocabChart;
-  vocabularyView();
-}
+      state.hideVocabChart = !state.hideVocabChart;
+      vocabularyView();
+    }
     if (action === "next-vocab")          { state.vocabQuestion = null; render(); }
     if (action === "prev-vocab-ruku")     { if (state.targetGlobalRuku > 1) { state.targetGlobalRuku--; loadLocalStudyData(); } }
     if (action === "next-vocab-ruku")     { if (state.targetGlobalRuku < 556) { state.targetGlobalRuku++; loadLocalStudyData(); } }
@@ -1013,7 +1172,7 @@ document.addEventListener("click", event => {
     // Arabic tab
     if (action === "arabic-mode") {
       state.arabicMode = btn.dataset.mode;
-      if ((state.arabicMode === "letter" || state.arabicMode === "random") && state.arabicWordIndex === null && !state.arabicIndexLoading) {
+      if (state.arabicMode === "letter" && state.arabicWordIndex === null && !state.arabicIndexLoading) {
         loadArabicIndex();
       } else {
         render();
@@ -1026,6 +1185,49 @@ document.addEventListener("click", event => {
       else render();
     }
     if (action === "arabic-random")       getArabicRandom();
+    if (action === "prev-arabic-ruku") {
+      if (state.targetGlobalRuku > 1) {
+        state.targetGlobalRuku--;
+        loadLocalStudyData();
+      }
+    }
+    if (action === "next-arabic-ruku") {
+      if (state.targetGlobalRuku < 556) {
+        state.targetGlobalRuku++;
+        loadLocalStudyData();
+      }
+    }
+    if (action === "prev-arabic-surah") {
+      if (state.arabicSurahId > 1) {
+        const prevSid = state.arabicSurahId - 1;
+        resolveGlobalRuku(prevSid, "ruku", 1)
+          .then(g => { state.targetGlobalRuku = g; return loadLocalStudyData(); })
+          .catch(e => toast(e.message || "Could not load that surah."));
+      }
+    }
+    if (action === "next-arabic-surah") {
+      if (state.arabicSurahId < 114) {
+        const nextSid = state.arabicSurahId + 1;
+        resolveGlobalRuku(nextSid, "ruku", 1)
+          .then(g => { state.targetGlobalRuku = g; return loadLocalStudyData(); })
+          .catch(e => toast(e.message || "Could not load that surah."));
+      }
+    }
+    if (action === "vocab-quiz-answer") {
+      answerVocabQuiz(btn);
+    }
+    if (action === "vocab-quiz-continue") {
+      const active = state.activeSurah;
+      const rukuWords = active.verses.flatMap(v => v.words.map(w => ({ ar: w[0], meaning: w[1], ayah: v.n })));
+      if (state.vocabQuizIndex + 1 >= rukuWords.length) {
+        advanceVocabQuizRuku();
+      } else {
+        state.vocabQuizIndex++;
+        state.vocabQuizChoices = [];
+        state.vocabQuizLastAnswered = null;
+        render();
+      }
+    }
 
     // Journey
     if (action === "enable-reminder")     enableReminder();
@@ -1040,6 +1242,10 @@ document.addEventListener("change", event => {
   if (event.target.id === "language")            { state.language = event.target.value === "ur" ? "ur" : "en"; render(); }
   if (event.target.id === "nav-surah")           { state.navSurahId = Number(event.target.value); }
   if (event.target.id === "arabic-browse-surah") { state.arabicSurahId = Number(event.target.value); }
+  if (event.target.id === "arabic-surah-select") {
+    state.arabicSurahId = Number(event.target.value);
+    render();
+  }
   if (event.target.id === "arabic-ruku-surah") {
     state.arabicSurahId = Number(event.target.value);
     state.arabicInput = state.surahRukus[state.arabicSurahId]?.[0]?.number || 1;
@@ -1088,6 +1294,13 @@ document.addEventListener("submit", event => {
       resolveGlobalRuku(sid, "ruku", rukuN)
         .then(g => { state.targetGlobalRuku = g; return loadLocalStudyData(); })
         .catch(e => toast(e.message || "Could not load that ruku."));
+    }
+    if (event.target.id === "arabic-surah-form") {
+      const sid = Number($("#arabic-surah-select").value);
+      state.arabicSurahId = sid;
+      resolveGlobalRuku(sid, "ruku", 1)
+        .then(g => { state.targetGlobalRuku = g; return loadLocalStudyData(); })
+        .catch(e => toast(e.message || "Could not load that surah."));
     }
   } catch (error) {
     console.error(error);
@@ -1160,6 +1373,52 @@ function answerVocab(btn) {
     state.vocabQuestion = null; // Clear old question
     vocabularyView();           // Re-render next word
   }, 1500);
+}
+
+function answerVocabQuiz(btn) {
+  const active = state.activeSurah;
+  if (!active) return;
+  const rukuWords = active.verses.flatMap(v => v.words.map(w => ({ ar: w[0], meaning: w[1], ayah: v.n })));
+  if (!rukuWords.length) return;
+  
+  const chosen = btn.dataset.choice;
+  const expected = rukuWords[state.vocabQuizIndex].meaning;
+  const correct = chosen === expected;
+  
+  state.vocabQuizLastAnswered = { chosen, correct: expected, wasCorrect: correct };
+  
+  if (correct) {
+    progress.vocabPoints = (progress.vocabPoints || 0) + 1;
+    initTodayActivity();
+    progress.todayActivity.arabicWords++;
+    persist();
+    render();
+    setTimeout(() => {
+      if (state.vocabQuizIndex + 1 >= rukuWords.length) {
+        advanceVocabQuizRuku();
+      } else {
+        state.vocabQuizIndex++;
+        state.vocabQuizChoices = [];
+        state.vocabQuizLastAnswered = null;
+        render();
+      }
+    }, 700);
+  } else {
+    render();
+  }
+}
+
+function advanceVocabQuizRuku() {
+  if (state.targetGlobalRuku >= 556) {
+    state.vocabQuizIndex = 0;
+    state.vocabQuizChoices = [];
+    state.vocabQuizLastAnswered = null;
+    toast("You have reached the end of the Quran. Starting this ruku again.");
+    render();
+    return;
+  }
+  state.targetGlobalRuku++;
+  loadLocalStudyData();
 }
 
 // ── AI helpers ────────────────────────────────────────────────────────────────
