@@ -165,15 +165,32 @@ function initTodayActivity() {
 // Marks confirmed in corpus: U+06D6–U+06DC, U+06DE, U+06DF.
 // Each mark is kept at the END of its preceding segment (the natural pause unit).
 function getWaqfSegments(verses) {
-  const pauseMark = /[\u06D6-\u06DC\u06DE\u06DF]/;
   return verses.flatMap(v => {
     const segments = [];
     let part = [];
+    let u06dbSeenCount = 0;
     // Split only after a complete whitespace-delimited word bearing a waqf mark.
     // This prevents a word from ever being cut in the middle.
     for (const word of v.ar.trim().split(/\s+/)) {
       part.push(word);
-      if (pauseMark.test(word)) {
+      
+      const hasU06D6 = word.includes('\u06D6');
+      const hasU06D7 = word.includes('\u06D7');
+      const hasU06D8 = word.includes('\u06D8');
+      const hasU06DA = word.includes('\u06DA');
+      const hasU06DB = word.includes('\u06DB');
+      
+      let shouldSplit = false;
+      if (hasU06D6 || hasU06D7 || hasU06D8 || hasU06DA) {
+        shouldSplit = true;
+      } else if (hasU06DB) {
+        u06dbSeenCount++;
+        if (u06dbSeenCount === 1) {
+          shouldSplit = true;
+        }
+      }
+      
+      if (shouldSplit) {
         segments.push({ text: part.join(" "), ayah: v.n });
         part = [];
       }
