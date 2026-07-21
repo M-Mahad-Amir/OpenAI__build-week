@@ -363,29 +363,31 @@ function readingView() {
 
   app.innerHTML = `
     <section class="hero">
-      <p>GLOBAL RUKU ${state.activeSurah.rukuInQuran} · SURAH RUKU ${state.activeSurah.ruku} · ${state.activeSurah.verses.length} AYAHS · LOCAL QURAN CORPUS</p>
+      <p>GLOBAL RUKU ${state.activeSurah.rukuInQuran} · ${state.activeSurah.verses.length} AYAHS · LOCAL QURAN CORPUS</p>
       <h2>${state.activeSurah.name} <span style="font-weight:400;font-size:18px">— ${state.activeSurah.meaning}</span></h2>
       <div class="arabic">${state.activeSurah.arabicName}</div>
     </section>
 
     <div class="card" style="margin-bottom:20px;padding:15px">
-      <p class="section-label">NAVIGATE · SURAH &amp; RUKU / AYAH</p>
+      <p class="section-label">NAVIGATE · SURAH &amp; AYAH</p>
       <form id="nav-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <select id="nav-surah" class="field" style="margin:0;flex:2;min-width:160px">${opts}</select>
+        
+        <!-- Tab for Ayah Navigation -->
         <div class="tabs">
-          <button type="button" class="chip ${state.navMode==="ruku"?"active":""}" data-action="nav-mode" data-mode="ruku">Ruku #</button>
-          <button type="button" class="chip ${state.navMode==="ayah"?"active":""}" data-action="nav-mode" data-mode="ayah">Ayah #</button>
+          <button type="button" class="chip active">Ayah #</button>
         </div>
-        <input type="number" id="nav-input" class="field" value="${state.navInput}" min="1"
-          placeholder="${state.navMode==="ruku"?"Ruku #":"Ayah #"}" style="margin:0;width:80px" required>
+
+        <input type="number" id="nav-input" class="field" value="${state.navInput || 1}" min="1"
+          placeholder="Ayah #" style="margin:0;width:80px" required>
         <button type="submit" class="button" style="padding:10px 15px">Load</button>
       </form>
     </div>
 
     <div class="toolbar">
       <div class="tabs">
-        <button class="chip ${state.showTranslation?"active":""}" data-action="toggle-translation">Translation</button>
-        <button class="chip ${state.showWords?"active":""}" data-action="toggle-words">Word by word</button>
+        <button class="chip ${state.showTranslation ? "active" : ""}" data-action="toggle-translation">Translation</button>
+        <button class="chip ${state.showWords ? "active" : ""}" data-action="toggle-words">Word by word</button>
         <select id="language" aria-label="Translation language">
           <option value="en">English</option>
           <option value="ur">Urdu</option>
@@ -399,8 +401,8 @@ function readingView() {
         <article class="ayah-card">
           <span class="ayah-num">${v.n}</span>
           <div class="ayah-ar">${v.ar}</div>
-          ${state.showTranslation ? `<p class="translation" ${state.language==="ur"?"dir=rtl":""}>${v[state.language]}</p>` : ""}
-          ${state.showWords ? `<div class="word-list">${v.words.map(w=>`<span class="word"><b>${w[0]}</b> ${w[1]}</span>`).join("")}</div>` : ""}
+          ${state.showTranslation ? `<p class="translation" ${state.language === "ur" ? "dir=rtl" : ""}>${v[state.language]}</p>` : ""}
+          ${state.showWords ? `<div class="word-list">${v.words.map(w => `<span class="word"><b>${w[0]}</b> ${w[1]}</span>`).join("")}</div>` : ""}
           <div class="ayah-actions">
             <button class="text-button" data-action="toggle-tafsir" data-ayah="${v.n}">⌁ Tafsir</button>
             <button class="text-button" data-action="hifz-at" data-ayah="${v.n}">◇ Hifz from here</button>
@@ -411,24 +413,11 @@ function readingView() {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:16px;padding:0 4px">
-      <button class="button secondary" data-action="prev-ruku" ${state.targetGlobalRuku<=1?"disabled":""}>← Prev Ruku</button>
-      <button class="button secondary" data-action="next-ruku" ${state.targetGlobalRuku>=556?"disabled":""}>Next Ruku →</button>
+      <button class="button secondary" data-action="prev-ruku" ${state.targetGlobalRuku <= 1 ? "disabled" : ""}>← Prev Ruku</button>
+      <button class="button secondary" data-action="next-ruku" ${state.targetGlobalRuku >= 556 ? "disabled" : ""}>Next Ruku →</button>
     </div>`;
 
   $("#language").value = state.language;
-}
-
-function tafsirFor(n) {
-  const text = state.activeSurah.tafsir?.[String(n)]?.tafsir;
-  return `
-    <div class="tafsir">
-      <h4>Tafsir <span class="pill">Ayah ${n}</span></h4>
-      ${text
-        ? `<p style="font-size:0.88rem;line-height:1.7;max-height:300px;overflow-y:auto">${escape(text)}</p>
-           <p class="source">Local tafsir dataset · not a substitute for primary scholarly sources.</p>`
-        : `<p>${state.activeSurah.tafsir ? "No tafsir entry found for this ayah." : "Tafsir could not be loaded for this surah."}</p>`}
-      <button class="text-button" data-action="to-lesson">Open full lesson →</button>
-    </div>`;
 }
 
 // ── Hifz ─────────────────────────────────────────────────────────────────────
@@ -753,6 +742,8 @@ function wordGrid(words) {
 
 // ── Vocabulary (ruku-scoped) ───────────────────────────────────────────────────
 
+// ── Vocabulary (ruku-scoped) ───────────────────────────────────────────────────
+
 function vocabularyView() {
   if (!state.activeSurah) return;
   if (!state.vocabBank.length) {
@@ -769,9 +760,11 @@ function vocabularyView() {
     };
   }
   const q = state.vocabQuestion;
+
   app.innerHTML = `
     <section class="grid-2">
-      <article class="card">
+      <!-- 1. Vocabulary Card (Hides when state.hideVocabChart is true) -->
+      <article class="card" style="${state.hideVocabChart ? 'display: none;' : ''}">
         <p class="section-label">RUKU VOCABULARY</p>
         <h2>Words from this ruku</h2>
         <div>
@@ -784,12 +777,23 @@ function vocabularyView() {
           `).join("")}
         </div>
       </article>
-      <article class="card">
+
+      <!-- 2. Quiz Card (Takes full width when vocabulary is hidden) -->
+      <article class="card" style="${state.hideVocabChart ? 'grid-column: span 2;' : ''}">
         <p class="section-label">QUICK CHECK · MULTIPLE CHOICE</p>
         <h2>What does <span class="vocab-ar">${q.word.ar}</span> mean?</h2>
         ${q.choices.map(c => `<button class="quiz-option" data-action="vocab-answer" data-choice="${escape(c)}">${c}</button>`).join("")}
         <div id="vocab-feedback"></div>
-        <button class="text-button" data-action="next-vocab" style="margin-top:15px">New word →</button>
+
+        <div style="display: flex; gap: 10px; align-items: center; margin-top: 15px;">
+          <button class="text-button" data-action="next-vocab">New word →</button>
+          
+          <!-- Toggle Button to test memorization -->
+          <button class="text-button" data-action="toggle-vocab-chart" style="margin-left: auto;">
+            ${state.hideVocabChart ? "👁️ Show Chart" : "🙈 Hide Chart (Test Memorization)"}
+          </button>
+        </div>
+
         <hr style="border:0;border-top:1px solid var(--line);margin:24px 0">
         <p class="section-label">IN THIS RUKU</p>
         <div class="word-list">
@@ -998,6 +1002,10 @@ document.addEventListener("click", event => {
 
     // Vocabulary
     if (action === "vocab-answer")        answerVocab(btn);
+    if (action === "toggle-vocab-chart") {
+  state.hideVocabChart = !state.hideVocabChart;
+  vocabularyView();
+}
     if (action === "next-vocab")          { state.vocabQuestion = null; render(); }
     if (action === "prev-vocab-ruku")     { if (state.targetGlobalRuku > 1) { state.targetGlobalRuku--; loadLocalStudyData(); } }
     if (action === "next-vocab-ruku")     { if (state.targetGlobalRuku < 556) { state.targetGlobalRuku++; loadLocalStudyData(); } }
@@ -1134,18 +1142,24 @@ function answerQuiz(btn) {
 }
 
 function answerVocab(btn) {
-  const correct = btn.dataset.choice === state.vocabQuestion.word.meaning;
-  document.querySelectorAll(".quiz-option").forEach(x => x.disabled = true);
-  btn.classList.add(correct ? "correct" : "wrong");
-  $("#vocab-feedback").innerHTML = `<div class="feedback">${correct ? "Correct — moving to the next ayah…" : `The answer is: ${state.vocabQuestion.word.meaning}.`}</div>`;
-  if (correct) {
-    const ayahsWithWords = state.activeSurah.verses.filter(v => v.words.length);
-    setTimeout(() => {
-      state.vocabAyahIndex = (state.vocabAyahIndex + 1) % ayahsWithWords.length;
-      state.vocabQuestion = null;
-      render();
-    }, 700);
+  const choice = unescape(btn.getAttribute("data-choice"));
+  const feedback = document.getElementById("vocab-feedback");
+  const isCorrect = choice === state.vocabQuestion.word.meaning;
+
+  if (isCorrect) {
+    feedback.innerHTML = `<p style="color: green; font-weight: bold; margin-top: 10px;">✅ Correct!</p>`;
+  } else {
+    feedback.innerHTML = `<p style="color: red; font-weight: bold; margin-top: 10px;">❌ Incorrect. Correct answer: ${state.vocabQuestion.word.meaning}</p>`;
   }
+
+  // Disable buttons while waiting to prevent multiple clicks
+  document.querySelectorAll('.quiz-option').forEach(b => b.disabled = true);
+
+  // ✅ ALWAYS advance to the next word after 1.5 seconds
+  setTimeout(() => {
+    state.vocabQuestion = null; // Clear old question
+    vocabularyView();           // Re-render next word
+  }, 1500);
 }
 
 // ── AI helpers ────────────────────────────────────────────────────────────────

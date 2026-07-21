@@ -3,7 +3,6 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 // Paste a browser-restricted Gemini API key here for local development.
 // For production, route AI requests through a server so the key is not public.
 const API_KEY = "";
-const MODEL_NAME = "gemini-3.5-flash";
 
 export const isGeminiConfigured = () => Boolean(API_KEY.trim());
 
