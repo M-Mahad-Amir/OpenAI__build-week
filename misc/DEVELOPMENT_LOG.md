@@ -175,11 +175,14 @@ The full-Quran index is generated offline via `misc/build_word_index.js` (stripp
 
 **Hifz Pause-Mark Splitting.** Fixed the waqf segment splitting logic in `getWaqfSegments()`. It now splits strictly on Unicode pause marks `U+06D6`, `U+06D7`, `U+06D8`, and `U+06DA`, as well as only the *first* mark of the `U+06DB` pair. It explicitly bypasses `U+06D9` and other non-pause codepoints. Segments are guaranteed to break at the end of an ayah and never in the middle of a word.
 
+**Ayah Read Auto-Tracking.** Configured the "Ayahs read today" field on the daily check-in form in the Journey tab to be auto-tracked. When ayahs are rendered in the Read Quran tab, they are tracked as read, and the daily activity summary and check-in form display this count in a read-only input.
+
 ### Technical decisions
 
 - **In-template Grouping**: Performed the consecutive Tafsir grouping inline inside the `lessonView()` template literal to keep the rendering logic cohesive and clean.
 - **Surah Vocabulary State Sync**: Syncing the selected Surah in "Surah Vocabulary" with the global `state.targetGlobalRuku` using the first ruku of the selected surah, ensuring state consistency across other views of the app.
 - **Deduplication of Selection Forms**: Used consistent forms and event handlers (`#arabic-ruku-form` and `#arabic-surah-form`) across tabs to reduce visual noise and code duplication.
+- **Unique Ayah Read Keys**: Stored read ayahs in today's activity as a list of unique `surahId:ayahNum` strings to ensure deduplicated counting.
 
 ### Verification performed
 
@@ -189,4 +192,6 @@ The full-Quran index is generated offline via `misc/build_word_index.js` (stripp
 - Verified the Arabic Vocabulary toolbar contains exactly 4 buttons: "Ruku Vocabulary", "Surah Vocabulary", "By Letter", and "Ruku Vocabulary Quiz".
 - Verified the sequential word progression, correct/wrong highlights, "Continue" button flow, and scoring metrics in "Ruku Vocabulary Quiz".
 - Verified segment splitting behavior against Ayahs 2:2, 2:5, 2:19, and 2:26 via a node test script to ensure correct pause marks match and pairs are handled properly.
+- Verified that loading/viewing the Read Quran tab increments the read ayahs count in today's auto-tracked activity and correctly populates the check-in form.
+
 
