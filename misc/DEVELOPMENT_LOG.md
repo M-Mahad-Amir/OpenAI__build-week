@@ -152,3 +152,37 @@ The full-Quran index is generated offline via `misc/build_word_index.js` (stripp
 - Verified index.html structure was restored properly with the new Arabic nav link.
 - Verified right-to-left layout constraints using overrides.css.
 - Checked git status to ensure working directory matches commit history clean baseline.
+
+## Ruku and Vocabulary Enhancements
+
+- Recorded: 2026-07-21
+- Files changed: `src/app.js` (modified)
+- Data artifacts created/updated: None
+
+### What now works
+
+**Read Quran Tab Ayah Navigation.** Resolved a bug where entering an Ayah number in the navigation form incorrectly resolved as a Ruku index because `state.navMode` was initialized to `"ruku"`. The initialization has been updated to `"ayah"`, and the form lookup now correctly resolves the global ruku index for that specific Ayah, moving the view directly to the ruku containing it.
+
+**Tafsir Restored.** Restored the missing `tafsirFor(n)` helper function in `src/app.js` which had been inadvertently removed in prior refactoring commits. This fixes the runtime ReferenceError crash when toggling the "Tafsir" button under an Ayah in the Read Quran tab.
+
+**Ruku Lesson Tab Tafsir Grouping.** Consecutive ayahs in the "Ruku Lesson" tab sharing the exact same Tafsir content (such as in Surah Al-Asr) are now grouped. Instead of displaying redundant, separate entries, the ayahs are displayed as a unified block (e.g., `AYAH 1-3`), listing all Arabic texts and translations, and rendering the shared Tafsir once.
+
+**Surah Vocabulary View.** Replaced the "Random 20" tab with a dedicated "Surah Vocabulary" button and view. It displays all vocabulary words for the active Surah grouped by Ayah, with a Surah dropdown selection and Hifz-aligned previous/next Surah buttons.
+
+**Ruku Vocabulary Quiz.** Extracted the inline "Quick Check" MCQ panel from the "Ruku Vocabulary" tab into its own tab and view named "Ruku Vocabulary Quiz". This allows the words list card in "Ruku Vocabulary" to expand to full-width.
+
+**Hifz-aligned Navigators and MCQ Quiz.** Updated the navigators/loaders in the Arabic Vocabulary Tab to match the aesthetics and layout of the Hifz Practice Tab (placed inside a unified picker card at the top). The multiple-choice quiz in "Ruku Vocabulary Quiz" now functions similarly to the Hifz practice quiz (word-by-word sequential progression, answer disablement, correct/wrong highlighting, and a "Continue" button on wrong selections). Correct answers are tracked in `progress.vocabPoints`.
+
+### Technical decisions
+
+- **In-template Grouping**: Performed the consecutive Tafsir grouping inline inside the `lessonView()` template literal to keep the rendering logic cohesive and clean.
+- **Surah Vocabulary State Sync**: Syncing the selected Surah in "Surah Vocabulary" with the global `state.targetGlobalRuku` using the first ruku of the selected surah, ensuring state consistency across other views of the app.
+- **Deduplication of Selection Forms**: Used consistent forms and event handlers (`#arabic-ruku-form` and `#arabic-surah-form`) across tabs to reduce visual noise and code duplication.
+
+### Verification performed
+
+- Verified navigation behavior by typing an Ayah number and checking that the correct Ruku loads.
+- Verified that toggling "Tafsir" on the Read Quran tab renders the local Tafsir without crashing.
+- Verified Surah Al-Asr (Surah 103) groups Ayahs 1-3 under `AYAH 1-3` in the Ruku Lesson view.
+- Verified the Arabic Vocabulary toolbar contains exactly 4 buttons: "Ruku Vocabulary", "Surah Vocabulary", "By Letter", and "Ruku Vocabulary Quiz".
+- Verified the sequential word progression, correct/wrong highlights, "Continue" button flow, and scoring metrics in "Ruku Vocabulary Quiz".
