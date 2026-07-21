@@ -173,6 +173,8 @@ The full-Quran index is generated offline via `misc/build_word_index.js` (stripp
 
 **Hifz-aligned Navigators and MCQ Quiz.** Updated the navigators/loaders in the Arabic Vocabulary Tab to match the aesthetics and layout of the Hifz Practice Tab (placed inside a unified picker card at the top). The multiple-choice quiz in "Ruku Vocabulary Quiz" now functions similarly to the Hifz practice quiz (word-by-word sequential progression, answer disablement, correct/wrong highlighting, and a "Continue" button on wrong selections). Correct answers are tracked in `progress.vocabPoints`.
 
+**Hifz Pause-Mark Splitting.** Fixed the waqf segment splitting logic in `getWaqfSegments()`. It now splits strictly on Unicode pause marks `U+06D6`, `U+06D7`, `U+06D8`, and `U+06DA`, as well as only the *first* mark of the `U+06DB` pair. It explicitly bypasses `U+06D9` and other non-pause codepoints. Segments are guaranteed to break at the end of an ayah and never in the middle of a word.
+
 ### Technical decisions
 
 - **In-template Grouping**: Performed the consecutive Tafsir grouping inline inside the `lessonView()` template literal to keep the rendering logic cohesive and clean.
@@ -186,3 +188,5 @@ The full-Quran index is generated offline via `misc/build_word_index.js` (stripp
 - Verified Surah Al-Asr (Surah 103) groups Ayahs 1-3 under `AYAH 1-3` in the Ruku Lesson view.
 - Verified the Arabic Vocabulary toolbar contains exactly 4 buttons: "Ruku Vocabulary", "Surah Vocabulary", "By Letter", and "Ruku Vocabulary Quiz".
 - Verified the sequential word progression, correct/wrong highlights, "Continue" button flow, and scoring metrics in "Ruku Vocabulary Quiz".
+- Verified segment splitting behavior against Ayahs 2:2, 2:5, 2:19, and 2:26 via a node test script to ensure correct pause marks match and pairs are handled properly.
+
