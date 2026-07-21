@@ -3,11 +3,10 @@ import { getSurahTafsir } from "./tafsirService.js";
 import { getSurahWords } from "./vocabularyService.js";
 import { getWordIndex } from "./wordIndexService.js";
 import {
-  askGeminiAboutLesson,
-  generateDynamicQuiz,
-  generateStudySummary,
-  isGeminiConfigured
-} from "./geminiService.js";
+  askRag,
+  generateRagQuiz,
+  generateRagSummary
+} from "./ragService.js";
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const app = $("#app");
@@ -644,9 +643,7 @@ function lessonView() {
               ${state.quizIndex>=state.lessonQuiz.length-1?"disabled":""} style="padding:8px 14px">Next →</button>
           </div>
         ` : `
-          <p>${isGeminiConfigured()
-            ? "Generate a five-question quiz from this local ruku."
-            : "Please Add your Gemini API key in src/geminiService.js to generate a quiz."}</p>
+          <p>Generate a five-question quiz grounded in retrieved tafsir excerpts.</p>
         `}
         ${!allAnswered ? `<button class="text-button" data-action="refresh-quiz" ${state.quizLoading?"disabled":""}
           style="margin-top:15px">${state.quizLoading?"Generating quiz…":"↻ Generate new quiz"}</button>
@@ -656,7 +653,7 @@ function lessonView() {
     <section class="card" style="margin-top:18px">
       <p class="section-label">ASK AI · CHAT INTERACTIVE</p>
       <h2>Ask about this ruku</h2>
-      <p>The AI receives only the locally loaded tafsir for this ruku.</p>
+      <p>Answers are grounded in retrieved tafsir excerpts for this ruku.</p>
       <form class="ask-form" id="ask-form">
         <input id="ask-input" maxlength="200" placeholder="e.g., Explain the core message of this ruku?" required>
         <button class="button">Ask AI</button>
@@ -1475,50 +1472,49 @@ function advanceVocabQuizRuku() {
 // ── AI helpers ────────────────────────────────────────────────────────────────
 
 async function generateSummary() {
-  if (!isGeminiConfigured()) return toast("Paste your Gemini API key in src/geminiService.js to use AI summaries.");
   state.summaryLoading = true; render();
   try {
-    const summary = await generateStudySummary(createStudyContext(state.activeSurah));
+    const summary = await generateRagSummary(createStudyContext(state.activeSurah));
     state.activeSurah.lesson = {
       ...state.activeSurah.lesson,
       summary: summary.summary || summary.background || "",
-      sources: [...state.activeSurah.lesson.sources, "AI overview constrained to the selected local ruku"]
+      sources: summary.sources.map(source => `Tafsir · Surah ${source.surah}, ayahs ${source.ayahRange}`)
     };
   } catch (e) {
     console.error("Could not generate AI summary:", e);
-    toast("Could not generate an AI summary. Check the key and Gemini settings.");
+    toast("Could not generate an AI summary. Check the server configuration.");
   } finally {
     state.summaryLoading = false; render();
   }
 }
 
 async function generateQuiz() {
-  if (!isGeminiConfigured()) return toast("Please paste your Gemini API key in src/geminiService.js to use AI quizzes.");
   state.quizLoading = true; render();
   try {
-    const quiz = await generateDynamicQuiz(createStudyContext(state.activeSurah));
+    const quiz = await generateRagQuiz(createStudyContext(state.activeSurah));
     if (!Array.isArray(quiz) || quiz.length < 5) throw new Error("Gemini returned an incomplete quiz.");
     state.quizBank = quiz;
     newLessonQuiz();
   } catch (e) {
     console.error("Could not generate AI quiz:", e);
-    toast("Could not generate an AI quiz. Check the key and Gemini settings.");
+    toast("Could not generate an AI quiz. Check the server configuration.");
   } finally {
     state.quizLoading = false; render();
   }
 }
 
 async function askAI(question) {
-  if (!isGeminiConfigured()) return toast("Paste your Gemini API key in src/geminiService.js to use the AI Assistant.");
   const out = $("#ask-output");
   out.innerHTML = `<div class="ask-answer"><strong>Grounded answer</strong><br>Asking AI companion…</div>`;
   try {
-    const response = await askGeminiAboutLesson(question, createStudyContext(state.activeSurah));
+    const response = await askRag(question);
     out.innerHTML = `
       <div class="ask-answer">
         <strong>Grounded answer</strong>
-        ${renderMarkdown(response)}
-        <span class="source">Source: locally loaded ${state.activeSurah.name}, ruku ${state.activeSurah.ruku}</span>
+        ${renderMarkdown(response.answer)}
+        <div class="source-list">${response.sources.map(source =>
+          `<span class="source">Tafsir · Surah ${escape(source.surah)}, ayahs ${escape(source.ayahRange)}</span>`
+        ).join("")}</div>
       </div>`;
   } catch {
     out.innerHTML = `<div class="ask-answer"><strong>Grounded answer</strong><br>Error generating answer.</div>`;

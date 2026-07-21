@@ -86,6 +86,7 @@ export function createStudyContext(study, { ayahNumber } = {}) {
     ? study.verses.filter(verse => verse.n === ayahNumber)
     : study.verses;
   return {
+    surahId: study.id,
     surah: study.name,
     ruku: study.ruku,
     source: "Locally loaded tafsir for the selected ruku",

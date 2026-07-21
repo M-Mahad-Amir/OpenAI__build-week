@@ -1,0 +1,12 @@
+{
+  "name": "noorpath-tafsir-ingest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ingest:tafsir": "node scripts/ingest.js"
+  },
+  "dependencies": {
+    "@qdrant/js-client-rest": "^1.15.0",
+    "dotenv": "^16.6.1"
+  }
+}
