@@ -194,4 +194,38 @@ The full-Quran index is generated offline via `misc/build_word_index.js` (stripp
 - Verified segment splitting behavior against Ayahs 2:2, 2:5, 2:19, and 2:26 via a node test script to ensure correct pause marks match and pairs are handled properly.
 - Verified that loading/viewing the Read Quran tab increments the read ayahs count in today's auto-tracked activity and correctly populates the check-in form.
 
+## Vercel RAG study-flow refactor
+
+- Recorded: 2026-07-22
+- Commit: not yet created
+- Files changed: `scripts/ingest.js` (new), `package.json` (new), `package-lock.json` (new), `.gitignore` (updated), `api/ask.js` (new), `src/ragService.js` (new), `src/app.js` (modified), `src/quranService.js` (modified), `src/geminiService.js` (modified), `index.html` (modified), and `README.md` (updated).
+
+### What now works
+
+**Grouped tafsir ingestion.** `scripts/ingest.js` reads every per-surah tafsir file and compares adjacent ayahs' tafsir strings exactly. A run of identical text becomes one chunk with `{ id, surah, ayahRange, arabic[], translation[], tafsir }`. The Arabic and English translation arrays are joined from `data/quran.json`. Chunk IDs are readable (`surah:ayah` or `surah:start-end`); deterministic UUIDs are used as Qdrant point IDs so repeated ingests update rather than duplicate records.
+
+**Hugging Face embeddings and Qdrant storage.** Tafsir text is embedded with `sentence-transformers/all-MiniLM-L6-v2` through the explicit Hugging Face feature-extraction endpoint. The script creates/uses Qdrant collection `noorpath_tafsir` with 384-dimensional cosine vectors, batches upserts, and creates an integer payload index on `surah`. The index is required by Qdrant Cloud for the ruku-scoped retrieval filter. The existing corpus generated 1,896 chunks with no missing Quran-text joins.
+
+**Serverless RAG endpoint.** `api/ask.js` is a Vercel serverless function. Its public Q&A request shape is `{ question }`; it embeds the question, retrieves the five best `noorpath_tafsir` hits, builds context from stored Arabic/English ayah text plus tafsir, calls Gemini server-side, and returns `{ answer, sources: [{ surah, ayahRange }] }`. The endpoint also retains internal summary and quiz modes for the existing Ruku Lesson controls. Scoped lesson retrieval first resolves the active ruku's point IDs, then asks Qdrant to rank only those points semantically.
+
+**Frontend RAG boundary.** `src/ragService.js` is now the browser service for AI study functionality. `askRag(question)` posts only `{ question }` to `/api/ask` and returns `{ answer, sources }`. The Ruku Lesson summary, quiz, and Q&A UI actions import this service instead of importing `geminiService.js`; returned sources are rendered below Q&A answers. The direct browser Gemini import map was removed from `index.html`, so no Gemini credential or SDK is delivered to visitors.
+
+**Secrets and deployment.** `HF_TOKEN`, `QDRANT_URL`, `QDRANT_API_KEY`, and `GEMINI_API_KEY` are read only from `process.env` in the serverless route. Local `.env.local` and `node_modules/` are ignored by Git. The application can be deployed to Vercel once the four environment variables are configured; local core reading works with a static server, while AI requires the Vercel runtime (`vercel dev`) or a deployment.
+
+### Technical decisions
+
+- The Hugging Face endpoint includes `/pipeline/feature-extraction`; using the model's default route selects sentence-similarity and returns scores instead of 384-dimensional vectors.
+- `surah` filtering is indexed in Qdrant rather than scanning the full collection for each ruku request. The configured Qdrant collection was updated with this index after its initial ingest.
+- `src/geminiService.js` remains in the tree for compatibility/history, but `src/app.js` no longer imports it. Gemini generation is performed only by `api/ask.js` with server environment credentials.
+- The current Gemini generation target is `gemini-3.5-flash`; the previous Gemini 2.0 Flash model is shut down. No model or API secret is defined in client-side code.
+- The refactor does not alter canonical reading, tafsir display, vocabulary, Hifz, or browser-local progress tracking.
+
+### Verification performed
+
+- Parsed all tafsir files and `data/quran.json`: 6,236 Quran ayahs, 1,896 grouped tafsir chunks, and zero missing Quran joins.
+- Ran JavaScript syntax checks for `scripts/ingest.js`, `api/ask.js`, `src/app.js`, `src/geminiService.js`, `src/ragService.js`, and `src/quranService.js`.
+- Confirmed installed top-level packages: `@qdrant/js-client-rest` and `dotenv`.
+- Created the `noorpath_tafsir.surah` integer payload index in the configured Qdrant project.
+- Invoked the serverless handler with the configured local environment. A scoped Al-Fatihah quiz returned HTTP 200, five questions, and five source chunks; a public `{ question }` request returned HTTP 200, an answer string, and five `{ surah, ayahRange }` sources.
+
 
